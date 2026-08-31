@@ -7,6 +7,9 @@ on:
         description: "Version to publish, for example 0.1.1"
         required: true
         default: "0.1.0"
+  push:
+    tags:
+      - "desktop-v*"
 
 permissions:
   contents: write
@@ -31,10 +34,24 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Resolve release metadata
+        id: release
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $version = "${{ github.event.inputs.version }}"
+            $tag = "desktop-v$version"
+          } else {
+            $tag = "${{ github.ref_name }}"
+            $version = $tag -replace '^desktop-v', ''
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+
       - name: Apply release version
         shell: pwsh
         run: |
-          $version = "${{ github.event.inputs.version }}"
+          $version = "${{ steps.release.outputs.version }}"
           (Get-Content package.json) -replace '"version": "[^"]+"', """version"": ""$version""" | Set-Content package.json
           (Get-Content src-tauri/tauri.conf.json) -replace '"version": "[^"]+"', """version"": ""$version""" | Set-Content src-tauri/tauri.conf.json
           (Get-Content src-tauri/Cargo.toml) -replace 'version = "[^"]+"', "version = ""$version""" | Set-Content src-tauri/Cargo.toml
@@ -44,8 +61,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: desktop-v${{ github.event.inputs.version }}
-          releaseName: A365 Escritorio v${{ github.event.inputs.version }}
+          tagName: ${{ steps.release.outputs.tag }}
+          releaseName: A365 Escritorio v${{ steps.release.outputs.version }}
           releaseBody: "Instalador de escritorio para usar A365 desde la red local del usuario."
           releaseDraft: false
           prerelease: false
