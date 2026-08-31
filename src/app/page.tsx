@@ -2118,7 +2118,7 @@ export default function Home() {
                   type="password"
                   value={reportSessionId}
                   onChange={(event) => setReportSessionId(event.target.value)}
-                  placeholder="Pega tu sesion"
+                  placeholder="PHPSESSID=... o solo el valor"
                   autoComplete="off"
                   required
                 />

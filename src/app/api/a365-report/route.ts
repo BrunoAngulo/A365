@@ -14,6 +14,12 @@ function isValidSession(value: string) {
   return /^[A-Za-z0-9]+$/.test(value);
 }
 
+function normalizeSession(value: string) {
+  const trimmed = value.trim();
+  const cookieMatch = trimmed.match(/(?:^|;\s*)PHPSESSID=([^;\s]+)/i) ?? trimmed.match(/PHPSESSID=([^;\s]+)/i);
+  return (cookieMatch?.[1] ?? trimmed).replace(/^["']|["']$/g, "").trim();
+}
+
 export async function POST(request: Request) {
   let body: ReportRequest;
 
@@ -25,7 +31,7 @@ export async function POST(request: Request) {
 
   const startDate = body.startDate?.trim() ?? "";
   const endDate = body.endDate?.trim() ?? "";
-  const sessionId = body.sessionId?.trim() ?? "";
+  const sessionId = normalizeSession(body.sessionId ?? "");
 
   if (!isValidDate(startDate) || !isValidDate(endDate)) {
     return Response.json({ error: "Selecciona fechas validas." }, { status: 400 });
@@ -39,8 +45,13 @@ export async function POST(request: Request) {
   const upstreamResponse = await fetch(upstreamUrl, {
     headers: {
       accept: "text/html,application/xhtml+xml,application/xml;q=0.9,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;q=0.8,*/*;q=0.7",
+      "accept-language": "es-419,es;q=0.9",
       cookie: `PHPSESSID=${sessionId}`,
       referer: "https://applinde.a365.com.pe/reportes/",
+      "sec-fetch-dest": "document",
+      "sec-fetch-mode": "navigate",
+      "sec-fetch-site": "same-origin",
+      "upgrade-insecure-requests": "1",
       "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36",
     },
   });
