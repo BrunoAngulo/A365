@@ -1,7 +1,6 @@
 const reportBaseUrl = "https://applinde.a365.com.pe/reportes/reporte_matriz";
 
 export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 type ReportRequest = {

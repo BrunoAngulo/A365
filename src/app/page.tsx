@@ -40,6 +40,18 @@ import styles from "./page.module.css";
 
 type RawRow = Record<string, unknown>;
 
+declare global {
+  interface Window {
+    __TAURI_INTERNALS__?: unknown;
+  }
+}
+
+type TauriMatrixReport = {
+  dataBase64: string;
+  contentType: string;
+  fileName: string;
+};
+
 type MetricRow = {
   id: number;
   date: string;
@@ -717,6 +729,21 @@ function formatPercent(value: number) {
   return `${value.toFixed(value >= 10 ? 1 : 2)}%`;
 }
 
+function isTauriRuntime() {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
+function base64ToUint8Array(value: string) {
+  const binary = window.atob(value);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return bytes;
+}
+
 function mapMatrixRows(rows: RawRow[]) {
   if (!rows.length) {
     return [];
@@ -1298,6 +1325,7 @@ function ChartPanel({
 export default function Home() {
   const inputRef = useRef<HTMLInputElement>(null);
   const incidentInputRef = useRef<HTMLInputElement>(null);
+  const matrixInputRef = useRef<HTMLInputElement>(null);
   const dateChartRef = useRef<HTMLDivElement>(null);
   const hourChartRef = useRef<HTMLDivElement>(null);
   const statusChartRef = useRef<HTMLDivElement>(null);
@@ -1319,6 +1347,7 @@ export default function Home() {
   const [matrixRows, setMatrixRows] = useState<MatrixRow[]>([]);
   const [matrixColumns, setMatrixColumns] = useState<string[]>([]);
   const [matrixRangeLabel, setMatrixRangeLabel] = useState("");
+  const [matrixFileName, setMatrixFileName] = useState("Sin archivo local");
   const [timelineDay, setTimelineDay] = useState("");
   const [timelineScale, setTimelineScale] = useState<TimelineScale>("day");
   const [showSlowResolutionOnly, setShowSlowResolutionOnly] = useState(false);
@@ -1754,13 +1783,21 @@ export default function Home() {
     );
   }
 
-  async function loadMatrixReport(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setReportError("");
-    setIsDownloadingReport(true);
+  async function requestMatrixReportBlob() {
+    if (isTauriRuntime()) {
+      const { invoke } = await import("@tauri-apps/api/core");
+      const report = await invoke<TauriMatrixReport>("download_matrix_report", {
+        startDate: reportStartDate,
+        endDate: reportEndDate,
+        sessionId: reportSessionId,
+      });
 
-    try {
-      const response = await fetch("/api/a365-report", {
+      return new Blob([base64ToUint8Array(report.dataBase64)], {
+        type: report.contentType || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+    }
+
+    const response = await fetch("/api/a365-report", {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -1772,39 +1809,72 @@ export default function Home() {
         }),
       });
 
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(payload?.error ?? "No pude descargar el reporte.");
-      }
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(payload?.error ?? "No pude descargar el reporte.");
+    }
 
-      const blob = await response.blob();
-      const file = new File([blob], `reporte-matriz-${reportStartDate}-${reportEndDate}.xlsx`, {
-        type: blob.type || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      });
-      let rawRows: RawRow[] = [];
+    return response.blob();
+  }
 
-      try {
-        rawRows = rowsFromSpreadsheet(await readSheet(file));
-      } catch {
-        rawRows = parseHtmlTableRows(await blob.text());
-      }
+  async function applyMatrixBlob(blob: Blob, label: string) {
+    const file = new File([blob], `reporte-matriz-${reportStartDate}-${reportEndDate}.xlsx`, {
+      type: blob.type || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    let rawRows: RawRow[] = [];
 
-      const mappedRows = mapMatrixRows(rawRows);
+    try {
+      rawRows = rowsFromSpreadsheet(await readSheet(file));
+    } catch {
+      rawRows = parseHtmlTableRows(await blob.text());
+    }
 
-      if (!mappedRows.length) {
-        throw new Error("La respuesta no trajo filas validas para la matriz.");
-      }
+    const mappedRows = mapMatrixRows(rawRows);
 
-      setMatrixRows(mappedRows);
-      setMatrixColumns(Object.keys(rawRows[0] ?? {}));
-      setMatrixRangeLabel(`${reportStartDate} a ${reportEndDate}`);
-      setTimelineDay(timelineDaysFromRows(mappedRows)[0] ?? "");
-      setShowSlowResolutionOnly(false);
-      setHoveredTimelineId(null);
+    if (!mappedRows.length) {
+      throw new Error("La respuesta no trajo filas validas para la matriz.");
+    }
+
+    setMatrixRows(mappedRows);
+    setMatrixColumns(Object.keys(rawRows[0] ?? {}));
+    setMatrixRangeLabel(label);
+    setTimelineDay(timelineDaysFromRows(mappedRows)[0] ?? "");
+    setShowSlowResolutionOnly(false);
+    setHoveredTimelineId(null);
+  }
+
+  async function loadMatrixReport(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setReportError("");
+    setIsDownloadingReport(true);
+
+    try {
+      await applyMatrixBlob(await requestMatrixReportBlob(), `${reportStartDate} a ${reportEndDate}`);
     } catch (currentError) {
       setReportError(currentError instanceof Error ? currentError.message : "No pude leer el reporte.");
     } finally {
       setIsDownloadingReport(false);
+    }
+  }
+
+  async function loadMatrixFile(file: File) {
+    setReportError("");
+    setMatrixFileName(file.name);
+    setIsDownloadingReport(true);
+
+    try {
+      await applyMatrixBlob(file, file.name);
+    } catch (currentError) {
+      setReportError(currentError instanceof Error ? currentError.message : "No pude leer el archivo de matriz.");
+    } finally {
+      setIsDownloadingReport(false);
+    }
+  }
+
+  function handleMatrixFiles(files: FileList | null) {
+    const file = files?.[0];
+    if (file) {
+      void loadMatrixFile(file);
     }
   }
 
@@ -2000,6 +2070,16 @@ export default function Home() {
         <div>
           <h1>Control operativo</h1>
         </div>
+        <a
+          className={styles.downloadAppLink}
+          href="https://github.com/BrunoAngulo/A365/releases/latest"
+          target="_blank"
+          rel="noreferrer"
+        >
+          <Download size={18} aria-hidden="true" />
+          <span>Descargar app escritorio</span>
+          <strong>Windows</strong>
+        </a>
       </section>
 
       <nav className={styles.topNav} onClick={stopInsideClick} aria-label="Navegacion de indicadores">
@@ -2126,6 +2206,27 @@ export default function Home() {
                 {isDownloadingReport ? "Analizando" : "Leer matriz"}
               </button>
             </form>
+            <div
+              className={styles.inlineUpload}
+              onClick={() => matrixInputRef.current?.click()}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  matrixInputRef.current?.click();
+                }
+              }}
+            >
+              <FileSpreadsheet size={18} aria-hidden="true" />
+              <span>{matrixFileName}</span>
+              <strong>Cargar Excel local</strong>
+              <input
+                ref={matrixInputRef}
+                type="file"
+                accept=".xlsx,.xls,.csv,.txt,.tsv"
+                onChange={(event) => handleMatrixFiles(event.target.files)}
+              />
+            </div>
             {reportError ? <strong>{reportError}</strong> : null}
           </section>
 

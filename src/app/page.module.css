@@ -24,7 +24,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
   gap: 24px;
-  align-items: stretch;
+  align-items: center;
   width: min(1280px, 100%);
   margin: 0 auto 24px;
 }
@@ -54,6 +54,49 @@
   color: var(--muted);
   font-size: 18px;
   line-height: 1.6;
+}
+
+.downloadAppLink {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  justify-self: end;
+  width: min(100%, 360px);
+  min-height: 52px;
+  padding: 10px 14px;
+  border: 1px solid var(--pink-200);
+  border-radius: 999px;
+  color: var(--pink-700);
+  background: rgba(255, 255, 255, 0.84);
+  box-shadow: 0 14px 32px rgba(190, 24, 93, 0.1);
+  text-decoration: none;
+  transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
+}
+
+.downloadAppLink:hover {
+  border-color: var(--pink-500);
+  background: #ffffff;
+  transform: translateY(-1px);
+}
+
+.downloadAppLink span,
+.downloadAppLink strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.downloadAppLink span {
+  font-size: 14px;
+  font-weight: 850;
+}
+
+.downloadAppLink strong {
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: var(--pink-100);
+  font-size: 12px;
 }
 
 .dropzone {

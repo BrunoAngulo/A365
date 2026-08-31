@@ -5,10 +5,13 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:tauri-frontend": "node scripts/build-tauri-frontend.mjs",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "tauri": "tauri"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2.11.1",
     "html-to-image": "^1.11.13",
     "lucide-react": "^1.37.0",
     "next": "16.3.3",
@@ -18,6 +21,7 @@
     "recharts": "^3.10.1"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

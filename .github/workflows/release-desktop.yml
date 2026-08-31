@@ -1,0 +1,52 @@
+name: Release desktop app
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish, for example 0.1.1"
+        required: true
+        default: "0.1.0"
+
+permissions:
+  contents: write
+
+jobs:
+  release-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Apply release version
+        shell: pwsh
+        run: |
+          $version = "${{ github.event.inputs.version }}"
+          (Get-Content package.json) -replace '"version": "[^"]+"', """version"": ""$version""" | Set-Content package.json
+          (Get-Content src-tauri/tauri.conf.json) -replace '"version": "[^"]+"', """version"": ""$version""" | Set-Content src-tauri/tauri.conf.json
+          (Get-Content src-tauri/Cargo.toml) -replace 'version = "[^"]+"', "version = ""$version""" | Set-Content src-tauri/Cargo.toml
+
+      - name: Build and publish installer
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: desktop-v${{ github.event.inputs.version }}
+          releaseName: A365 Escritorio v${{ github.event.inputs.version }}
+          releaseBody: "Instalador de escritorio para usar A365 desde la red local del usuario."
+          releaseDraft: false
+          prerelease: false
+          args: --target x86_64-pc-windows-msvc
