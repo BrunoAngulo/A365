@@ -231,17 +231,6 @@ const chartColors = [
   "#bbf7d0",
 ];
 
-const demoRows: MetricRow[] = [
-  { id: 1, date: "2026-08-24", week: "2026-S35", month: "2026-08", hour: "09:00", phone: "+51 987 123 456", user: "Maria", campaignId: "CMP-101", statusName: "Contactado", raw: { call_date: "2026-08-24T09:12:00", phone_number_dialed: "+51 987 123 456", user: "Maria", campaign_id: "CMP-101", status_name: "Contactado" } },
-  { id: 2, date: "2026-08-24", week: "2026-S35", month: "2026-08", hour: "10:00", phone: "+51 956 443 201", user: "Luis", campaignId: "CMP-101", statusName: "No contesta", raw: { call_date: "2026-08-24T10:20:00", phone_number_dialed: "+51 956 443 201", user: "Luis", campaign_id: "CMP-101", status_name: "No contesta" } },
-  { id: 3, date: "2026-08-25", week: "2026-S35", month: "2026-08", hour: "11:00", phone: "+51 999 800 120", user: "Ana", campaignId: "CMP-204", statusName: "Venta", raw: { call_date: "2026-08-25T11:03:00", phone_number_dialed: "+51 999 800 120", user: "Ana", campaign_id: "CMP-204", status_name: "Venta" } },
-  { id: 4, date: "2026-08-25", week: "2026-S35", month: "2026-08", hour: "15:00", phone: "+51 944 320 111", user: "Maria", campaignId: "CMP-204", statusName: "Contactado", raw: { call_date: "2026-08-25T15:42:00", phone_number_dialed: "+51 944 320 111", user: "Maria", campaign_id: "CMP-204", status_name: "Contactado" } },
-  { id: 5, date: "2026-08-26", week: "2026-S35", month: "2026-08", hour: "16:00", phone: "+51 933 740 812", user: "Diego", campaignId: "CMP-101", statusName: "Pendiente", raw: { call_date: "2026-08-26T16:18:00", phone_number_dialed: "+51 933 740 812", user: "Diego", campaign_id: "CMP-101", status_name: "Pendiente" } },
-  { id: 6, date: "2026-08-27", week: "2026-S35", month: "2026-08", hour: "09:00", phone: "+51 970 662 114", user: "Ana", campaignId: "CMP-330", statusName: "Venta", raw: { call_date: "2026-08-27T09:55:00", phone_number_dialed: "+51 970 662 114", user: "Ana", campaign_id: "CMP-330", status_name: "Venta" } },
-];
-
-const demoColumns = Object.keys(demoRows[0].raw);
-
 const columnAliases = {
   date: ["date", "fecha", "created_at", "createdat", "call_date", "call date", "fecha_creacion", "created"],
   hour: ["hour", "hora", "time", "call_time", "call time", "created_time", "created time"],
@@ -1313,9 +1302,9 @@ export default function Home() {
   const hourChartRef = useRef<HTMLDivElement>(null);
   const statusChartRef = useRef<HTMLDivElement>(null);
   const campaignChartRef = useRef<HTMLDivElement>(null);
-  const [rows, setRows] = useState<MetricRow[]>(demoRows);
-  const [columns, setColumns] = useState<string[]>(demoColumns);
-  const [fileName, setFileName] = useState("Datos demo");
+  const [rows, setRows] = useState<MetricRow[]>([]);
+  const [columns, setColumns] = useState<string[]>([]);
+  const [fileName, setFileName] = useState("Sin archivo cargado");
   const [error, setError] = useState("");
   const [isDragging, setIsDragging] = useState(false);
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>(null);
@@ -2013,39 +2002,6 @@ export default function Home() {
         <div>
           <h1>Control operativo</h1>
         </div>
-
-        <div
-          className={`${styles.dropzone} ${isDragging ? styles.dropzoneActive : ""}`}
-          onClick={() => inputRef.current?.click()}
-          onDragEnter={(event) => {
-            event.preventDefault();
-            setIsDragging(true);
-          }}
-          onDragOver={(event) => event.preventDefault()}
-          onDragLeave={() => setIsDragging(false)}
-          onDrop={(event) => {
-            event.preventDefault();
-            setIsDragging(false);
-            handleFiles(event.dataTransfer.files);
-          }}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              inputRef.current?.click();
-            }
-          }}
-        >
-          <Upload size={24} aria-hidden="true" />
-          <strong>Cargar llamadas inbound</strong>
-          <span>TXT, CSV o Excel</span>
-          <input
-            ref={inputRef}
-            type="file"
-            accept=".txt,.csv,.tsv,.xlsx,.xls"
-            onChange={(event) => handleFiles(event.target.files)}
-          />
-        </div>
       </section>
 
       <nav className={styles.topNav} onClick={stopInsideClick} aria-label="Navegacion de indicadores">
@@ -2081,15 +2037,62 @@ export default function Home() {
 
       {activeView === "calls" ? (
         <>
+          <section className={styles.reportPanel} onClick={stopInsideClick}>
+            <div>
+              <h2>I1 - Llamadas inbound</h2>
+              <span>Carga el reporte real para ver fechas, horas, usuarios, telefonos, campaign_id y status_name.</span>
+            </div>
+            <div
+              className={`${styles.inlineUpload} ${isDragging ? styles.dropzoneActive : ""}`}
+              onClick={() => inputRef.current?.click()}
+              onDragEnter={(event) => {
+                event.preventDefault();
+                setIsDragging(true);
+              }}
+              onDragOver={(event) => event.preventDefault()}
+              onDragLeave={() => setIsDragging(false)}
+              onDrop={(event) => {
+                event.preventDefault();
+                setIsDragging(false);
+                handleFiles(event.dataTransfer.files);
+              }}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  inputRef.current?.click();
+                }
+              }}
+            >
+              <Upload size={18} aria-hidden="true" />
+              <span>{fileName}</span>
+              <strong>Cargar archivo</strong>
+              <input
+                ref={inputRef}
+                type="file"
+                accept=".txt,.csv,.tsv,.xlsx,.xls"
+                onChange={(event) => handleFiles(event.target.files)}
+              />
+            </div>
+          </section>
+
           {error ? <div className={styles.error} onClick={stopInsideClick}>{error}</div> : null}
 
-          <section className={styles.fileBar} onClick={stopInsideClick}>
-            <FileSpreadsheet size={18} aria-hidden="true" />
-            <span>{fileName}</span>
-            <strong>
-              {visibleRows.length.toLocaleString("es-PE")} de {rows.length.toLocaleString("es-PE")} registros
-            </strong>
-          </section>
+          {rows.length ? (
+            <section className={styles.fileBar} onClick={stopInsideClick}>
+              <FileSpreadsheet size={18} aria-hidden="true" />
+              <span>{fileName}</span>
+              <strong>
+                {visibleRows.length.toLocaleString("es-PE")} de {rows.length.toLocaleString("es-PE")} registros
+              </strong>
+            </section>
+          ) : (
+            <section className={styles.emptyState} onClick={stopInsideClick}>
+              <Phone size={22} aria-hidden="true" />
+              <strong>I1 - Llamadas inbound listo</strong>
+              <span>Carga un TXT, CSV o Excel para empezar sin datos de ejemplo.</span>
+            </section>
+          )}
         </>
       ) : null}
 
@@ -2439,7 +2442,7 @@ export default function Home() {
         </section>
       ) : null}
 
-      {activeView === "calls" && activeFilter ? (
+      {activeView === "calls" && rows.length && activeFilter ? (
         <section className={styles.filterBar} onClick={stopInsideClick}>
           <span>
             Vista filtrada por {activeFilter.label}: <strong>{activeFilter.value}</strong>
@@ -2448,7 +2451,7 @@ export default function Home() {
         </section>
       ) : null}
 
-      {activeView === "calls" ? (
+      {activeView === "calls" && rows.length ? (
         <>
       <section className={styles.statsGrid} onClick={stopInsideClick}>
         <StatCard icon={<Hash size={18} />} label="Registros" value={currentSummary.total.toLocaleString("es-PE")} />
@@ -2582,7 +2585,7 @@ export default function Home() {
         </>
       ) : null}
 
-      {activeView === "calls" && expandedChart ? (
+      {activeView === "calls" && rows.length && expandedChart ? (
         <div className={styles.modalBackdrop} onClick={() => setExpandedChart(null)} role="presentation">
           <section className={styles.modal} onClick={stopInsideClick} role="dialog" aria-modal="true" aria-label="Grafico ampliado">
             <div className={styles.modalHeader}>
