@@ -1705,9 +1705,7 @@ export default function Home() {
                           onMouseEnter={() => setHoveredTimelineId(block.id)}
                           onFocus={() => setHoveredTimelineId(block.id)}
                           aria-label={block.detail}
-                        >
-                          <span>{block.range}</span>
-                        </button>
+                        />
                       ))}
                     </div>
                   </div>
