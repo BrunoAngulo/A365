@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "A365 Local Bridge",
+  "version": "0.1.0",
+  "description": "Permite que el dashboard A365 descargue reportes desde el navegador local.",
+  "permissions": [
+    "cookies"
+  ],
+  "host_permissions": [
+    "https://applinde.a365.com.pe/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://localhost/*",
+        "http://127.0.0.1/*",
+        "https://*.vercel.app/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ]
+}

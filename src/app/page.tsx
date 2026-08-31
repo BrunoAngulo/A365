@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { FormEvent, MouseEvent as ReactMouseEvent, ReactNode, RefObject } from "react";
 import {
   Bar,
@@ -50,6 +50,16 @@ type TauriMatrixReport = {
   dataBase64: string;
   contentType: string;
   fileName: string;
+};
+
+type ExtensionMatrixResponse = {
+  source?: string;
+  type?: string;
+  requestId?: string;
+  ok?: boolean;
+  error?: string;
+  dataBase64?: string;
+  contentType?: string;
 };
 
 type MetricRow = {
@@ -1348,6 +1358,7 @@ export default function Home() {
   const [matrixColumns, setMatrixColumns] = useState<string[]>([]);
   const [matrixRangeLabel, setMatrixRangeLabel] = useState("");
   const [matrixFileName, setMatrixFileName] = useState("Sin archivo local");
+  const [extensionReady, setExtensionReady] = useState(false);
   const [timelineDay, setTimelineDay] = useState("");
   const [timelineScale, setTimelineScale] = useState<TimelineScale>("day");
   const [showSlowResolutionOnly, setShowSlowResolutionOnly] = useState(false);
@@ -1412,6 +1423,23 @@ export default function Home() {
     status: statusChartRef,
     campaign: campaignChartRef,
   };
+
+  useEffect(() => {
+    function handleExtensionMessage(event: MessageEvent) {
+      if (event.source !== window || event.data?.source !== "a365-extension") {
+        return;
+      }
+
+      if (event.data.type === "A365_EXTENSION_READY") {
+        setExtensionReady(true);
+      }
+    }
+
+    window.addEventListener("message", handleExtensionMessage);
+    window.postMessage({ source: "a365-dashboard", type: "A365_EXTENSION_PING" }, window.location.origin);
+
+    return () => window.removeEventListener("message", handleExtensionMessage);
+  }, []);
 
   function clearFilters() {
     startFilterTransition(() => {
@@ -1797,6 +1825,10 @@ export default function Home() {
       });
     }
 
+    if (extensionReady) {
+      return requestMatrixReportFromExtension();
+    }
+
     const response = await fetch("/api/a365-report", {
         method: "POST",
         headers: {
@@ -1815,6 +1847,54 @@ export default function Home() {
     }
 
     return response.blob();
+  }
+
+  function requestMatrixReportFromExtension() {
+    return new Promise<Blob>((resolve, reject) => {
+      const requestId = crypto.randomUUID();
+      const timeout = window.setTimeout(() => {
+        window.removeEventListener("message", handleResponse);
+        reject(new Error("La extension no respondio. Recarga la web o revisa que este instalada."));
+      }, 45000);
+
+      function handleResponse(event: MessageEvent<ExtensionMatrixResponse>) {
+        if (
+          event.source !== window ||
+          event.data?.source !== "a365-extension" ||
+          event.data.type !== "A365_MATRIX_REPORT_RESPONSE" ||
+          event.data.requestId !== requestId
+        ) {
+          return;
+        }
+
+        window.clearTimeout(timeout);
+        window.removeEventListener("message", handleResponse);
+
+        if (!event.data.ok || !event.data.dataBase64) {
+          reject(new Error(event.data.error ?? "La extension no pudo descargar el reporte."));
+          return;
+        }
+
+        resolve(new Blob([base64ToUint8Array(event.data.dataBase64)], {
+          type: event.data.contentType || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        }));
+      }
+
+      window.addEventListener("message", handleResponse);
+      window.postMessage(
+        {
+          source: "a365-dashboard",
+          type: "A365_MATRIX_REPORT_REQUEST",
+          requestId,
+          payload: {
+            startDate: reportStartDate,
+            endDate: reportEndDate,
+            sessionId: reportSessionId,
+          },
+        },
+        window.location.origin,
+      );
+    });
   }
 
   async function applyMatrixBlob(blob: Blob, label: string) {
@@ -2072,13 +2152,12 @@ export default function Home() {
         </div>
         <a
           className={styles.downloadAppLink}
-          href="https://github.com/BrunoAngulo/A365/releases/latest"
-          target="_blank"
-          rel="noreferrer"
+          href="/a365-extension.zip"
+          download
         >
           <Download size={18} aria-hidden="true" />
-          <span>Descargar app escritorio</span>
-          <strong>Windows</strong>
+          <span>Descargar extension local</span>
+          <strong>Chrome/Edge</strong>
         </a>
       </section>
 
@@ -2179,7 +2258,11 @@ export default function Home() {
           <section className={styles.reportPanel} onClick={stopInsideClick}>
             <div>
               <h2>Matriz A365</h2>
-              <span>Ingresa tu PHPSESSID y el rango de fechas para leer el reporte en indicadores.</span>
+              <span>
+                {extensionReady
+                  ? "Extension conectada: la descarga saldra desde tu navegador local."
+                  : "Ingresa tu PHPSESSID y el rango de fechas. En Vercel instala la extension local."}
+              </span>
             </div>
             <form className={styles.reportForm} onSubmit={loadMatrixReport}>
               <label>
