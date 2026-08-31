@@ -217,18 +217,18 @@ const timelineScales: Array<{ value: TimelineScale; label: string }> = [
 ];
 
 const chartColors = [
-  "#2563eb",
-  "#10b981",
-  "#f59e0b",
-  "#ef4444",
-  "#7c3aed",
-  "#0f766e",
-  "#db2777",
-  "#475569",
-  "#14b8a6",
-  "#ea580c",
-  "#4f46e5",
-  "#16a34a",
+  "#f9a8d4",
+  "#fbcfe8",
+  "#f472b6",
+  "#f0abfc",
+  "#e9d5ff",
+  "#fecdd3",
+  "#fda4af",
+  "#f5d0fe",
+  "#ddd6fe",
+  "#fed7aa",
+  "#bae6fd",
+  "#bbf7d0",
 ];
 
 const demoRows: MetricRow[] = [
@@ -1525,7 +1525,7 @@ export default function Home() {
       <div className={styles.chartShell}>
         <ResponsiveContainer width="100%" height={height}>
           <BarChart data={data} margin={{ left: 0, right: 16, top: 8, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#dbe4f0" />
+            <CartesianGrid strokeDasharray="3 3" stroke="#f8dbe8" />
             <XAxis dataKey="name" tick={{ fontSize: 12 }} />
             <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
             <Tooltip />
@@ -1547,7 +1547,7 @@ export default function Home() {
             layout="vertical"
             margin={{ left: 16, right: 20, top: 8, bottom: 0 }}
           >
-            <CartesianGrid strokeDasharray="3 3" stroke="#dbe4f0" />
+            <CartesianGrid strokeDasharray="3 3" stroke="#f8dbe8" />
             <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} />
             <YAxis type="category" dataKey="name" tick={{ fontSize: 12 }} width={128} />
             <Tooltip
@@ -1557,8 +1557,8 @@ export default function Home() {
               ]}
             />
             <Legend />
-            <Bar dataKey="asignacion" name="Asignacion" fill="#2563eb" radius={[0, 4, 4, 0]} />
-            <Bar dataKey="resolucion" name="Resolucion" fill="#0f766e" radius={[0, 4, 4, 0]} />
+            <Bar dataKey="asignacion" name="Asignacion" fill="#f9a8d4" radius={[0, 4, 4, 0]} />
+            <Bar dataKey="resolucion" name="Resolucion" fill="#f0abfc" radius={[0, 4, 4, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -1576,11 +1576,11 @@ export default function Home() {
             layout="vertical"
             margin={{ left: 16, right: 20, top: 8, bottom: 0 }}
           >
-            <CartesianGrid strokeDasharray="3 3" stroke="#dbe4f0" />
+            <CartesianGrid strokeDasharray="3 3" stroke="#f8dbe8" />
             <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} />
             <YAxis type="category" dataKey="name" tick={{ fontSize: 12 }} width={128} />
             <Tooltip />
-            <Bar dataKey="total" name="Registros" fill="#7c3aed" radius={[0, 4, 4, 0]} />
+            <Bar dataKey="total" name="Registros" fill="#f472b6" radius={[0, 4, 4, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -1602,7 +1602,7 @@ export default function Home() {
             <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} />
             <YAxis type="category" dataKey="name" tick={{ fontSize: 12 }} width={150} />
             <Tooltip />
-            <Bar dataKey="total" name="Observaciones" fill="#ec4899" radius={[0, 4, 4, 0]} />
+            <Bar dataKey="total" name="Observaciones" fill="#f9a8d4" radius={[0, 4, 4, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -1635,9 +1635,9 @@ export default function Home() {
               labelFormatter={(label) => `Agente: ${label}`}
             />
             <Legend />
-            <Bar dataKey="productivity" name="Productividad" fill="#ec4899" radius={[0, 4, 4, 0]} />
-            <Bar dataKey="quality" name="Calidad" fill="#0f766e" radius={[0, 4, 4, 0]} />
-            <Bar dataKey="effectiveness" name="Efectividad" fill="#f59e0b" radius={[0, 4, 4, 0]} />
+            <Bar dataKey="productivity" name="Productividad" fill="#f9a8d4" radius={[0, 4, 4, 0]} />
+            <Bar dataKey="quality" name="Calidad" fill="#f0abfc" radius={[0, 4, 4, 0]} />
+            <Bar dataKey="effectiveness" name="Efectividad" fill="#fda4af" radius={[0, 4, 4, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -1851,7 +1851,7 @@ export default function Home() {
               }
             }}
           >
-            <CartesianGrid strokeDasharray="3 3" stroke="#dbe4f0" />
+            <CartesianGrid strokeDasharray="3 3" stroke="#f8dbe8" />
             <XAxis dataKey="name" tick={{ fontSize: 12 }} />
             <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
             <Tooltip />
@@ -1859,7 +1859,7 @@ export default function Home() {
               type="monotone"
               dataKey="total"
               name="Registros"
-              stroke="#2563eb"
+              stroke="#f472b6"
               strokeWidth={3}
               dot={{ r: 4 }}
             />
@@ -1886,14 +1886,14 @@ export default function Home() {
               }
             }}
           >
-            <CartesianGrid strokeDasharray="3 3" stroke="#dbe4f0" />
+            <CartesianGrid strokeDasharray="3 3" stroke="#f8dbe8" />
             <XAxis dataKey="name" tick={{ fontSize: 12 }} />
             <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
             <Tooltip />
             <Bar
               dataKey="total"
               name="Registros"
-              fill="#10b981"
+              fill="#f9a8d4"
               radius={[4, 4, 0, 0]}
               onClick={(entry) => {
                 const value = chartPointName(entry);
@@ -1969,14 +1969,14 @@ export default function Home() {
               }
             }}
           >
-            <CartesianGrid strokeDasharray="3 3" stroke="#dbe4f0" />
+            <CartesianGrid strokeDasharray="3 3" stroke="#f8dbe8" />
             <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} />
             <YAxis type="category" dataKey="name" tick={{ fontSize: 12 }} width={128} />
             <Tooltip />
             <Bar
               dataKey="total"
               name="Registros"
-              fill="#f59e0b"
+              fill="#f0abfc"
               radius={[0, 4, 4, 0]}
               onClick={(entry) => {
                 const value = chartPointName(entry);
@@ -2011,12 +2011,7 @@ export default function Home() {
     <main className={styles.page} onClick={clearFilters}>
       <section className={styles.header} onClick={stopInsideClick}>
         <div>
-          <span className={styles.eyebrow}>A365 indicadores</span>
-          <h1>Dashboard de campañas</h1>
-          <p>
-            Arrastra un TXT, CSV o Excel y convierte fechas, horas, usuarios,
-            telefonos, campaign_id y status_name en indicadores listos para revisar.
-          </p>
+          <h1>Control operativo</h1>
         </div>
 
         <div
@@ -2042,8 +2037,8 @@ export default function Home() {
           }}
         >
           <Upload size={24} aria-hidden="true" />
-          <strong>Arrastra tu archivo aqui</strong>
-          <span>Tambien puedes hacer clic para seleccionarlo</span>
+          <strong>Cargar llamadas inbound</strong>
+          <span>TXT, CSV o Excel</span>
           <input
             ref={inputRef}
             type="file"
@@ -2059,28 +2054,28 @@ export default function Home() {
           className={activeView === "calls" ? styles.topNavActive : ""}
           onClick={() => setActiveView("calls")}
         >
-          Indicadores 1
+          I1 - Llamadas inbound
         </button>
         <button
           type="button"
           className={activeView === "matrix" ? styles.topNavActive : ""}
           onClick={() => setActiveView("matrix")}
         >
-          Indicadores 2
+          I2 - Correos atendidos
         </button>
         <button
           type="button"
           className={activeView === "errors" ? styles.topNavActive : ""}
           onClick={() => setActiveView("errors")}
         >
-          Tasa de error
+          I3 - Tasa de error
         </button>
         <button
           type="button"
           className={activeView === "performance" ? styles.topNavActive : ""}
           onClick={() => setActiveView("performance")}
         >
-          Indicadores 4
+          I4 - Rendimiento operativo
         </button>
       </nav>
 
@@ -2192,13 +2187,13 @@ export default function Home() {
               title="Tipificacion"
               meta={`${matrixSummary.byTipificacion.length} tipos`}
             >
-              {renderMatrixBarChart(matrixSummary.byTipificacion, "#2563eb")}
+              {renderMatrixBarChart(matrixSummary.byTipificacion, "#f9a8d4")}
             </ChartPanel>
             <ChartPanel
               title="Estado de registro"
               meta={`${matrixSummary.byEstado.length} estados`}
             >
-              {renderMatrixBarChart(matrixSummary.byEstado, "#0f766e")}
+              {renderMatrixBarChart(matrixSummary.byEstado, "#f0abfc")}
             </ChartPanel>
             <ChartPanel
               title="Usuario asignado"
@@ -2249,7 +2244,7 @@ export default function Home() {
           ) : (
             <section className={styles.emptyState} onClick={stopInsideClick}>
               <Timer size={22} aria-hidden="true" />
-              <strong>Indicadores 2 listos para leer la matriz</strong>
+              <strong>I2 - Correos atendidos listo</strong>
               <span>Completa fechas y sesion para ver tiempos de asignacion y resolucion.</span>
             </section>
           )}
@@ -2312,13 +2307,13 @@ export default function Home() {
                   {renderIncidentAgentChart()}
                 </ChartPanel>
                 <ChartPanel title="Por tipo de inconsistencia" meta={`${incidentSummary.byType.length} tipos`}>
-                  {renderMatrixBarChart(incidentSummary.byType, "#ec4899")}
+                  {renderMatrixBarChart(incidentSummary.byType, "#f9a8d4")}
                 </ChartPanel>
                 <ChartPanel title="Por sucursal" meta={`${incidentSummary.byBranch.length} sucursales`}>
-                  {renderMatrixBarChart(incidentSummary.byBranch, "#db2777")}
+                  {renderMatrixBarChart(incidentSummary.byBranch, "#f472b6")}
                 </ChartPanel>
                 <ChartPanel title="Por mes" meta={`${incidentSummary.byMonth.length} meses`}>
-                  {renderMatrixBarChart(incidentSummary.byMonth, "#be185d")}
+                  {renderMatrixBarChart(incidentSummary.byMonth, "#f0abfc")}
                 </ChartPanel>
               </div>
 
@@ -2368,7 +2363,7 @@ export default function Home() {
         <section className={styles.matrixSection} onClick={stopInsideClick}>
           <div className={styles.matrixHeader}>
             <div>
-              <span className={styles.eyebrow}>Indicadores 4</span>
+              <span className={styles.eyebrow}>I4 - Rendimiento operativo</span>
               <h2>Productividad, calidad y efectividad</h2>
               <p>Calculado con llamadas inbound, correos matriz y errores levantados.</p>
             </div>
@@ -2397,7 +2392,7 @@ export default function Home() {
             >
               {renderMatrixBarChart(
                 performanceSummary.byAgent.map((row) => ({ name: row.agent, total: row.attended })),
-                "#db2777",
+                "#f472b6",
                 Math.max(280, Math.min(620, performanceSummary.byAgent.length * 42)),
               )}
             </ChartPanel>
