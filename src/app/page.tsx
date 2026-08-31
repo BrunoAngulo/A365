@@ -22,6 +22,7 @@ import type { Row } from "read-excel-file/browser";
 import {
   CalendarDays,
   Clock3,
+  ClipboardList,
   Download,
   FileSpreadsheet,
   Hash,
@@ -60,7 +61,7 @@ type ChartPoint = {
 type FilterField = "date" | "week" | "month" | "hour" | "statusName" | "campaignId" | "user";
 type ChartKind = "date" | "hour" | "status" | "campaign";
 type DateMode = "week" | "month" | "total";
-type DashboardView = "calls" | "matrix";
+type DashboardView = "calls" | "matrix" | "errors" | "performance";
 type TimelineScale = "30m" | "1h" | "day";
 
 type ActiveFilter = {
@@ -122,6 +123,57 @@ type MatrixSummary = {
   avgByAgent: TimeAveragePoint[];
   avgByDay: TimeAveragePoint[];
   avgByMonth: TimeAveragePoint[];
+};
+
+type IncidentRow = {
+  id: number;
+  startTime: string;
+  endTime: string;
+  email: string;
+  agent: string;
+  branch: string;
+  incidentDate: string;
+  customerCode: string;
+  customerName: string;
+  inconsistencyType: string;
+  channel: string;
+  subject: string;
+  detail: string;
+  impact: string;
+  raw: Record<string, string>;
+};
+
+type IncidentSummary = {
+  total: number;
+  uniqueAgents: number;
+  uniqueTypes: number;
+  uniqueBranches: number;
+  byAgent: ChartPoint[];
+  byType: ChartPoint[];
+  byBranch: ChartPoint[];
+  byMonth: ChartPoint[];
+};
+
+type AgentIndicatorRow = {
+  agent: string;
+  calls: number;
+  emails: number;
+  errors: number;
+  attended: number;
+  productivity: number;
+  quality: number;
+  effectiveness: number;
+};
+
+type PerformanceSummary = {
+  totalCalls: number;
+  totalEmails: number;
+  totalAttended: number;
+  totalErrors: number;
+  productivity: number;
+  quality: number;
+  effectiveness: number;
+  byAgent: AgentIndicatorRow[];
 };
 
 type TimeAveragePoint = {
@@ -250,6 +302,22 @@ const matrixColumnAliases = {
   fechaRegistro: ["fecha de registro", "fecha_registro"],
   nroMov: ["nro_mov", "nro mov", "numero movimiento"],
   idEmail: ["id_email", "id email"],
+};
+
+const incidentColumnAliases = {
+  startTime: ["hora de inicio", "inicio", "start time"],
+  endTime: ["hora de finalizacion", "hora de finalización", "finalizacion", "finalización", "end time"],
+  email: ["correo electronico", "correo electrónico", "email"],
+  agent: ["nombre", "agente", "usuario", "asesor"],
+  branch: ["a que sucursal pertenece el cliente", "sucursal", "plaza"],
+  incidentDate: ["fecha de incidente", "fecha incidente"],
+  customerCode: ["codigo de cliente", "código de cliente", "cod cliente"],
+  customerName: ["razon social del cliente", "razón social del cliente", "cliente"],
+  inconsistencyType: ["tipo de inconsistencia", "inconsistencia", "observacion", "observación"],
+  channel: ["medio de comunicacion", "medio de comunicación", "canal"],
+  subject: ["asunto del correo", "asunto"],
+  detail: ["detalle de la incidencia", "breve explicacion", "breve explicación", "detalle"],
+  impact: ["impacto"],
 };
 
 function normalizeKey(value: string) {
@@ -516,6 +584,32 @@ function rowsFromSpreadsheet(sheetRows: Row[]) {
     );
 }
 
+function rowsFromSheetRows(sheetRows: Row[]) {
+  const headers = (sheetRows[0] ?? []).map((header, index) =>
+    valueAsText(header) || `columna_${index + 1}`,
+  );
+
+  return sheetRows
+    .slice(1)
+    .filter((line) => line.some((cell) => valueAsText(cell)))
+    .map((line) =>
+      headers.reduce<RawRow>((record, header, index) => {
+        record[header] = line[index] ?? "";
+        return record;
+      }, {}),
+    );
+}
+
+function dateForGrouping(value: string) {
+  const date = parseDateTimeValue(value);
+  return date ? formatLocalDate(date) : "Sin fecha";
+}
+
+function monthForGrouping(value: string) {
+  const date = dateForGrouping(value);
+  return date === "Sin fecha" ? "Sin mes" : date.slice(0, 7);
+}
+
 function parseHtmlTableRows(text: string) {
   if (typeof DOMParser === "undefined" || !/<table[\s>]/i.test(text)) {
     return [];
@@ -624,6 +718,14 @@ function formatMinutes(value: number | null) {
   }
 
   return `${hours} h ${String(minutes).padStart(2, "0")} min`;
+}
+
+function percentage(numerator: number, denominator: number) {
+  return denominator > 0 ? (numerator / denominator) * 100 : 0;
+}
+
+function formatPercent(value: number) {
+  return `${value.toFixed(value >= 10 ? 1 : 2)}%`;
 }
 
 function mapMatrixRows(rows: RawRow[]) {
@@ -874,6 +976,128 @@ function buildMatrixSummary(rows: MatrixRow[]): MatrixSummary {
   };
 }
 
+function mapIncidentRows(rows: RawRow[]) {
+  if (!rows.length) {
+    return [];
+  }
+
+  const headers = Object.keys(rows[0]);
+  const columns = {
+    startTime: findColumn(headers, incidentColumnAliases.startTime),
+    endTime: findColumn(headers, incidentColumnAliases.endTime),
+    email: findColumn(headers, incidentColumnAliases.email),
+    agent: findColumn(headers, incidentColumnAliases.agent),
+    branch: findColumn(headers, incidentColumnAliases.branch),
+    incidentDate: findColumn(headers, incidentColumnAliases.incidentDate),
+    customerCode: findColumn(headers, incidentColumnAliases.customerCode),
+    customerName: findColumn(headers, incidentColumnAliases.customerName),
+    inconsistencyType: findColumn(headers, incidentColumnAliases.inconsistencyType),
+    channel: findColumn(headers, incidentColumnAliases.channel),
+    subject: findColumn(headers, incidentColumnAliases.subject),
+    detail: findColumn(headers, incidentColumnAliases.detail),
+    impact: findColumn(headers, incidentColumnAliases.impact),
+  };
+
+  return rows.map((row, index) => ({
+    id: Number(valueAsText(row.Id ?? row.id)) || index + 1,
+    startTime: valueAsText(columns.startTime ? row[columns.startTime] : ""),
+    endTime: valueAsText(columns.endTime ? row[columns.endTime] : ""),
+    email: valueAsText(columns.email ? row[columns.email] : "") || "Sin correo",
+    agent: valueAsText(columns.agent ? row[columns.agent] : "") || "Sin agente",
+    branch: valueAsText(columns.branch ? row[columns.branch] : "") || "Sin sucursal",
+    incidentDate: valueAsText(columns.incidentDate ? row[columns.incidentDate] : "") || "Sin fecha",
+    customerCode: valueAsText(columns.customerCode ? row[columns.customerCode] : ""),
+    customerName: valueAsText(columns.customerName ? row[columns.customerName] : "") || "Sin cliente",
+    inconsistencyType: valueAsText(columns.inconsistencyType ? row[columns.inconsistencyType] : "") || "Sin tipo",
+    channel: valueAsText(columns.channel ? row[columns.channel] : "") || "Sin canal",
+    subject: valueAsText(columns.subject ? row[columns.subject] : "") || "Sin asunto",
+    detail: valueAsText(columns.detail ? row[columns.detail] : "") || "Sin detalle",
+    impact: valueAsText(columns.impact ? row[columns.impact] : "") || "Sin impacto",
+    raw: headers.reduce<Record<string, string>>((record, header) => {
+      record[header] = valueAsText(row[header]);
+      return record;
+    }, {}),
+  }));
+}
+
+function countIncidentsBy(rows: IncidentRow[], key: keyof IncidentRow, sortBy: "name" | "total" = "total") {
+  const map = new Map<string, number>();
+  rows.forEach((row) => addToCount(map, String(row[key] || "Sin dato")));
+  return pointsFromMap(map, sortBy);
+}
+
+function buildIncidentSummary(rows: IncidentRow[]): IncidentSummary {
+  const monthMap = new Map<string, number>();
+  rows.forEach((row) => addToCount(monthMap, monthForGrouping(row.incidentDate)));
+
+  return {
+    total: rows.length,
+    uniqueAgents: new Set(rows.map((row) => row.agent).filter(Boolean)).size,
+    uniqueTypes: new Set(rows.map((row) => row.inconsistencyType).filter(Boolean)).size,
+    uniqueBranches: new Set(rows.map((row) => row.branch).filter(Boolean)).size,
+    byAgent: countIncidentsBy(rows, "agent"),
+    byType: countIncidentsBy(rows, "inconsistencyType"),
+    byBranch: countIncidentsBy(rows, "branch"),
+    byMonth: pointsFromMap(monthMap, "name"),
+  };
+}
+
+function incrementAgent(map: Map<string, number>, agent: string, amount = 1) {
+  const key = agent || "Sin agente";
+  map.set(key, (map.get(key) ?? 0) + amount);
+}
+
+function buildPerformanceSummary(callRows: MetricRow[], emailRows: MatrixRow[], errorRows: IncidentRow[]): PerformanceSummary {
+  const callCounts = new Map<string, number>();
+  const emailCounts = new Map<string, number>();
+  const errorCounts = new Map<string, number>();
+
+  callRows.forEach((row) => incrementAgent(callCounts, row.user));
+  emailRows.forEach((row) => incrementAgent(emailCounts, row.usuarioAsignado));
+  errorRows.forEach((row) => incrementAgent(errorCounts, row.agent));
+
+  const totalCalls = callRows.length;
+  const totalEmails = emailRows.length;
+  const totalAttended = totalCalls + totalEmails;
+  const totalErrors = errorRows.length;
+  const agents = new Set([...callCounts.keys(), ...emailCounts.keys(), ...errorCounts.keys()]);
+  const byAgent = Array.from(agents)
+    .map((agent) => {
+      const calls = callCounts.get(agent) ?? 0;
+      const emails = emailCounts.get(agent) ?? 0;
+      const errors = errorCounts.get(agent) ?? 0;
+      const attended = calls + emails;
+      const productivity = percentage(attended, totalAttended);
+      const quality = percentage(errors, emails);
+
+      return {
+        agent,
+        calls,
+        emails,
+        errors,
+        attended,
+        productivity,
+        quality,
+        effectiveness: (productivity * quality) / 100,
+      };
+    })
+    .sort((a, b) => b.attended - a.attended || b.errors - a.errors || a.agent.localeCompare(b.agent));
+
+  const productivity = percentage(totalAttended, totalAttended);
+  const quality = percentage(totalErrors, totalEmails);
+
+  return {
+    totalCalls,
+    totalEmails,
+    totalAttended,
+    totalErrors,
+    productivity,
+    quality,
+    effectiveness: (productivity * quality) / 100,
+    byAgent,
+  };
+}
+
 function createFilterIndex() {
   return filterFields.reduce<FilterIndex>((index, field) => {
     index[field] = new Map();
@@ -1084,6 +1308,7 @@ function ChartPanel({
 
 export default function Home() {
   const inputRef = useRef<HTMLInputElement>(null);
+  const incidentInputRef = useRef<HTMLInputElement>(null);
   const dateChartRef = useRef<HTMLDivElement>(null);
   const hourChartRef = useRef<HTMLDivElement>(null);
   const statusChartRef = useRef<HTMLDivElement>(null);
@@ -1109,6 +1334,10 @@ export default function Home() {
   const [timelineScale, setTimelineScale] = useState<TimelineScale>("day");
   const [showSlowResolutionOnly, setShowSlowResolutionOnly] = useState(false);
   const [hoveredTimelineId, setHoveredTimelineId] = useState<string | null>(null);
+  const [incidentRows, setIncidentRows] = useState<IncidentRow[]>([]);
+  const [incidentColumns, setIncidentColumns] = useState<string[]>([]);
+  const [incidentFileName, setIncidentFileName] = useState("Sin archivo cargado");
+  const [incidentError, setIncidentError] = useState("");
   const [isFiltering, startFilterTransition] = useTransition();
 
   const filterIndex = useMemo(() => buildFilterIndex(rows), [rows]);
@@ -1147,6 +1376,12 @@ export default function Home() {
   const activeTimelineBlock =
     timelineRows.flatMap((row) => row.blocks).find((block) => block.id === hoveredTimelineId) ??
     timelineRows[0]?.blocks[0];
+  const incidentSummary = useMemo(() => buildIncidentSummary(incidentRows), [incidentRows]);
+  const incidentDetailRows = useMemo(() => incidentRows.slice(0, detailRowLimit), [incidentRows]);
+  const hiddenIncidentRows = Math.max(0, incidentRows.length - incidentDetailRows.length);
+  const incidentAgentChartHeight = Math.max(280, Math.min(760, incidentSummary.byAgent.length * 38));
+  const performanceSummary = useMemo(() => buildPerformanceSummary(rows, matrixRows, incidentRows), [incidentRows, matrixRows, rows]);
+  const performanceChartHeight = Math.max(320, Math.min(760, performanceSummary.byAgent.length * 44));
   const campaignChartHeight = Math.max(280, Math.min(760, byCampaign.length * 38));
   const matrixUserChartHeight = Math.max(280, Math.min(620, matrixSummary.byUser.length * 38));
   const userChartMax = byUser[0]?.total ?? 1;
@@ -1243,6 +1478,48 @@ export default function Home() {
     }
   }
 
+  async function loadIncidentFile(file: File) {
+    setIncidentError("");
+    setIncidentFileName(file.name);
+
+    try {
+      const extension = file.name.split(".").pop()?.toLowerCase();
+      let rawRows: RawRow[];
+
+      if (extension === "xlsx" || extension === "xls") {
+        let sheetRows: Row[];
+
+        try {
+          sheetRows = await readSheet(file, "BASE");
+        } catch {
+          sheetRows = await readSheet(file);
+        }
+
+        rawRows = rowsFromSheetRows(sheetRows);
+      } else {
+        rawRows = parseDelimitedText(await file.text());
+      }
+
+      const mappedRows = mapIncidentRows(rawRows);
+
+      if (!mappedRows.length) {
+        throw new Error("No encontre incidencias validas en el archivo.");
+      }
+
+      setIncidentRows(mappedRows);
+      setIncidentColumns(Object.keys(rawRows[0] ?? {}));
+    } catch (currentError) {
+      setIncidentError(currentError instanceof Error ? currentError.message : "No pude leer el archivo de incidencias.");
+    }
+  }
+
+  function handleIncidentFiles(files: FileList | null) {
+    const file = files?.[0];
+    if (file) {
+      void loadIncidentFile(file);
+    }
+  }
+
   function renderMatrixBarChart(data: ChartPoint[], color: string, height = 280) {
     return data.length ? (
       <div className={styles.chartShell}>
@@ -1309,6 +1586,63 @@ export default function Home() {
       </div>
     ) : (
       <EmptyChart>Sin usuarios para graficar</EmptyChart>
+    );
+  }
+
+  function renderIncidentAgentChart() {
+    return incidentSummary.byAgent.length ? (
+      <div className={styles.scrollChart}>
+        <ResponsiveContainer width="100%" height={incidentAgentChartHeight}>
+          <BarChart
+            data={incidentSummary.byAgent}
+            layout="vertical"
+            margin={{ left: 16, right: 20, top: 8, bottom: 0 }}
+          >
+            <CartesianGrid strokeDasharray="3 3" stroke="#f3d8e4" />
+            <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} />
+            <YAxis type="category" dataKey="name" tick={{ fontSize: 12 }} width={150} />
+            <Tooltip />
+            <Bar dataKey="total" name="Observaciones" fill="#ec4899" radius={[0, 4, 4, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    ) : (
+      <EmptyChart>Sin agentes para graficar</EmptyChart>
+    );
+  }
+
+  function renderPerformanceChart() {
+    return performanceSummary.byAgent.length ? (
+      <div className={styles.scrollChart}>
+        <ResponsiveContainer width="100%" height={performanceChartHeight}>
+          <BarChart
+            data={performanceSummary.byAgent}
+            layout="vertical"
+            margin={{ left: 16, right: 20, top: 8, bottom: 0 }}
+          >
+            <CartesianGrid strokeDasharray="3 3" stroke="#f3d8e4" />
+            <XAxis
+              type="number"
+              tick={{ fontSize: 12 }}
+              tickFormatter={(value) => `${Number(value).toFixed(0)}%`}
+            />
+            <YAxis type="category" dataKey="agent" tick={{ fontSize: 12 }} width={150} />
+            <Tooltip
+              formatter={(value, name) => [
+                typeof value === "number" ? formatPercent(value) : value,
+                name === "productivity" ? "Productividad" : name === "quality" ? "Calidad" : "Efectividad",
+              ]}
+              labelFormatter={(label) => `Agente: ${label}`}
+            />
+            <Legend />
+            <Bar dataKey="productivity" name="Productividad" fill="#ec4899" radius={[0, 4, 4, 0]} />
+            <Bar dataKey="quality" name="Calidad" fill="#0f766e" radius={[0, 4, 4, 0]} />
+            <Bar dataKey="effectiveness" name="Efectividad" fill="#f59e0b" radius={[0, 4, 4, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    ) : (
+      <EmptyChart>Carga llamadas, correos o errores para ver indicadores</EmptyChart>
     );
   }
 
@@ -1734,6 +2068,20 @@ export default function Home() {
         >
           Indicadores 2
         </button>
+        <button
+          type="button"
+          className={activeView === "errors" ? styles.topNavActive : ""}
+          onClick={() => setActiveView("errors")}
+        >
+          Tasa de error
+        </button>
+        <button
+          type="button"
+          className={activeView === "performance" ? styles.topNavActive : ""}
+          onClick={() => setActiveView("performance")}
+        >
+          Indicadores 4
+        </button>
       </nav>
 
       {activeView === "calls" ? (
@@ -1906,6 +2254,194 @@ export default function Home() {
             </section>
           )}
         </>
+      ) : null}
+
+      {activeView === "errors" ? (
+        <>
+          {incidentError ? <div className={styles.error} onClick={stopInsideClick}>{incidentError}</div> : null}
+
+          <section className={styles.reportPanel} onClick={stopInsideClick}>
+            <div>
+              <h2>Tasa de error</h2>
+              <span>Carga el Excel de incidencias para cuantificar errores por agente y por tipo.</span>
+            </div>
+            <div
+              className={styles.inlineUpload}
+              onClick={() => incidentInputRef.current?.click()}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  incidentInputRef.current?.click();
+                }
+              }}
+            >
+              <ClipboardList size={18} aria-hidden="true" />
+              <span>{incidentFileName}</span>
+              <strong>Cargar Excel</strong>
+              <input
+                ref={incidentInputRef}
+                type="file"
+                accept=".xlsx,.xls,.csv,.txt,.tsv"
+                onChange={(event) => handleIncidentFiles(event.target.files)}
+              />
+            </div>
+          </section>
+
+          {incidentRows.length ? (
+            <section className={styles.matrixSection} onClick={stopInsideClick}>
+              <div className={styles.matrixHeader}>
+                <div>
+                  <span className={styles.eyebrow}>Tasa de error</span>
+                  <h2>Errores levantados</h2>
+                  <p>Resumen desde la hoja BASE del registro de incidencias</p>
+                </div>
+                <strong>{incidentRows.length.toLocaleString("es-PE")} errores</strong>
+              </div>
+
+              <div className={styles.statsGrid}>
+                <StatCard icon={<ClipboardList size={18} />} label="Errores" value={incidentSummary.total.toLocaleString("es-PE")} />
+                <StatCard icon={<UserRound size={18} />} label="Agentes con error" value={incidentSummary.uniqueAgents.toLocaleString("es-PE")} />
+                <StatCard icon={<Hash size={18} />} label="Tipos de error" value={incidentSummary.uniqueTypes.toLocaleString("es-PE")} />
+                <StatCard icon={<CalendarDays size={18} />} label="Meses" value={incidentSummary.byMonth.length.toLocaleString("es-PE")} />
+                <StatCard icon={<FileSpreadsheet size={18} />} label="Sucursales" value={incidentSummary.uniqueBranches.toLocaleString("es-PE")} />
+              </div>
+
+              <div className={styles.matrixGrid}>
+                <ChartPanel title="Por agente" meta={`${incidentSummary.byAgent.length} agentes`}>
+                  {renderIncidentAgentChart()}
+                </ChartPanel>
+                <ChartPanel title="Por tipo de inconsistencia" meta={`${incidentSummary.byType.length} tipos`}>
+                  {renderMatrixBarChart(incidentSummary.byType, "#ec4899")}
+                </ChartPanel>
+                <ChartPanel title="Por sucursal" meta={`${incidentSummary.byBranch.length} sucursales`}>
+                  {renderMatrixBarChart(incidentSummary.byBranch, "#db2777")}
+                </ChartPanel>
+                <ChartPanel title="Por mes" meta={`${incidentSummary.byMonth.length} meses`}>
+                  {renderMatrixBarChart(incidentSummary.byMonth, "#be185d")}
+                </ChartPanel>
+              </div>
+
+              <article className={styles.panel}>
+                <div className={styles.panelHeader}>
+                  <div>
+                    <h2>Detalle de incidencias</h2>
+                    <span>
+                      {incidentRows.length.toLocaleString("es-PE")} registros
+                      {hiddenIncidentRows ? `, mostrando ${incidentDetailRows.length.toLocaleString("es-PE")} para mantener fluidez` : ""}
+                    </span>
+                  </div>
+                </div>
+                <div className={styles.tableWrap}>
+                  <table>
+                    <thead>
+                      <tr>
+                        {incidentColumns.map((column) => (
+                          <th key={column}>{column}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {incidentDetailRows.map((row) => (
+                        <tr key={row.id}>
+                          {incidentColumns.map((column) => (
+                            <td key={`${row.id}-${column}`}>{displayCellValue(column, row.raw[column])}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </article>
+            </section>
+          ) : (
+            <section className={styles.emptyState} onClick={stopInsideClick}>
+              <ClipboardList size={22} aria-hidden="true" />
+              <strong>Tasa de error lista</strong>
+              <span>Carga el archivo Registro de Incidencias para ver errores por agente y tipo.</span>
+            </section>
+          )}
+        </>
+      ) : null}
+
+      {activeView === "performance" ? (
+        <section className={styles.matrixSection} onClick={stopInsideClick}>
+          <div className={styles.matrixHeader}>
+            <div>
+              <span className={styles.eyebrow}>Indicadores 4</span>
+              <h2>Productividad, calidad y efectividad</h2>
+              <p>Calculado con llamadas inbound, correos matriz y errores levantados.</p>
+            </div>
+            <strong>{performanceSummary.byAgent.length.toLocaleString("es-PE")} agentes</strong>
+          </div>
+
+          <div className={styles.statsGrid}>
+            <StatCard icon={<Phone size={18} />} label="Llamadas" value={performanceSummary.totalCalls.toLocaleString("es-PE")} />
+            <StatCard icon={<Mail size={18} />} label="Correos" value={performanceSummary.totalEmails.toLocaleString("es-PE")} />
+            <StatCard icon={<ClipboardList size={18} />} label="Errores" value={performanceSummary.totalErrors.toLocaleString("es-PE")} />
+            <StatCard icon={<Hash size={18} />} label="Productividad" value={formatPercent(performanceSummary.productivity)} />
+            <StatCard icon={<Timer size={18} />} label="Calidad" value={formatPercent(performanceSummary.quality)} />
+            <StatCard icon={<UserRound size={18} />} label="Efectividad" value={formatPercent(performanceSummary.effectiveness)} />
+          </div>
+
+          <div className={styles.matrixGrid}>
+            <ChartPanel
+              title="Indicadores por agente"
+              meta="Productividad, calidad y efectividad"
+            >
+              {renderPerformanceChart()}
+            </ChartPanel>
+            <ChartPanel
+              title="Volumen por agente"
+              meta={`${performanceSummary.totalAttended.toLocaleString("es-PE")} atenciones`}
+            >
+              {renderMatrixBarChart(
+                performanceSummary.byAgent.map((row) => ({ name: row.agent, total: row.attended })),
+                "#db2777",
+                Math.max(280, Math.min(620, performanceSummary.byAgent.length * 42)),
+              )}
+            </ChartPanel>
+          </div>
+
+          <article className={styles.panel}>
+            <div className={styles.panelHeader}>
+              <div>
+                <h2>Detalle por agente</h2>
+                <span>Llamadas + correos, errores, calidad y efectividad</span>
+              </div>
+            </div>
+            <div className={styles.tableWrap}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Agente</th>
+                    <th>Llamadas</th>
+                    <th>Correos</th>
+                    <th>Atenciones</th>
+                    <th>Errores</th>
+                    <th>Productividad</th>
+                    <th>Calidad</th>
+                    <th>Efectividad</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {performanceSummary.byAgent.map((row) => (
+                    <tr key={row.agent}>
+                      <td>{row.agent}</td>
+                      <td>{row.calls.toLocaleString("es-PE")}</td>
+                      <td>{row.emails.toLocaleString("es-PE")}</td>
+                      <td>{row.attended.toLocaleString("es-PE")}</td>
+                      <td>{row.errors.toLocaleString("es-PE")}</td>
+                      <td>{formatPercent(row.productivity)}</td>
+                      <td>{row.emails ? formatPercent(row.quality) : "Sin correos"}</td>
+                      <td>{formatPercent(row.effectiveness)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </article>
+        </section>
       ) : null}
 
       {activeView === "calls" && activeFilter ? (

@@ -122,13 +122,56 @@
 
 .topNav {
   display: inline-grid;
-  grid-template-columns: repeat(2, minmax(140px, 1fr));
+  grid-template-columns: repeat(4, minmax(128px, 1fr));
   margin-bottom: 18px;
   padding: 4px;
   border: 1px solid var(--pink-200);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.76);
   box-shadow: 0 12px 30px rgba(190, 24, 93, 0.08);
+}
+
+.inlineUpload {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 48px;
+  padding: 8px 10px;
+  border: 1px dashed var(--pink-200);
+  border-radius: 18px;
+  color: var(--muted);
+  background: #ffffff;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.inlineUpload:hover {
+  border-color: var(--pink-500);
+  background: var(--pink-50);
+  transform: translateY(-1px);
+}
+
+.inlineUpload svg {
+  color: var(--pink-600);
+}
+
+.inlineUpload span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inlineUpload strong {
+  padding: 8px 10px;
+  border-radius: 999px;
+  color: var(--pink-700);
+  background: var(--pink-100);
+  font-size: 12px;
+}
+
+.inlineUpload input {
+  display: none;
 }
 
 .topNav button {
