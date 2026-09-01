@@ -1454,7 +1454,7 @@ export default function Home() {
   const [isFiltering, startFilterTransition] = useTransition();
 
   const dateFilteredRows = useMemo(
-    () => rows.filter((row) => (!callStartDate || row.date >= callStartDate) && (!callEndDate || row.date <= callEndDate)),
+    () => rows.filter((row) => (!callStartDate && !callEndDate) || (row.date !== "Sin fecha" && (!callStartDate || row.date >= callStartDate) && (!callEndDate || row.date <= callEndDate))),
     [callEndDate, callStartDate, rows],
   );
   const filterIndex = useMemo(() => buildFilterIndex(dateFilteredRows), [dateFilteredRows]);
