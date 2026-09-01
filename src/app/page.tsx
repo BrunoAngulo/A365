@@ -315,17 +315,16 @@ function HeatmapGrid({ cells, formatter }: { cells: HeatmapCell[]; formatter: (v
   return (
     <div className={styles.heatmapWrap}>
       <div className={styles.heatmapGrid}>
-        <div className={styles.heatmapCorner} />
+        <div className={styles.heatmapCorner}>Día / hora</div>
         {Array.from({ length: 24 }, (_, hour) => <span key={hour} className={styles.heatmapAxis}>{String(hour).padStart(2, "0")}</span>)}
-        {cells.map((cell) => {
-          const intensity = max ? 0.08 + (cell.value / max) * 0.92 : 0.08;
-          const style = { "--heatmap-alpha": intensity, "--heatmap-value": cell.value } as CSSProperties;
-          return (
-            <div key={`${cell.day}-${cell.hour}`} className={styles.heatmapCell} style={style} title={`${cell.day} ${String(cell.hour).padStart(2, "0")}:00 · ${formatter(cell.value)}`}>
-              {cell.hour === 0 ? <span className={styles.heatmapRowLabel}>{cell.day}</span> : null}
-            </div>
-          );
-        })}
+        {heatmapDays.flatMap((day, dayIndex) => [
+          <span key={`${day}-label`} className={styles.heatmapRowLabel}>{day}</span>,
+          ...cells.slice(dayIndex * 24, dayIndex * 24 + 24).map((cell) => {
+            const intensity = max ? 0.08 + (cell.value / max) * 0.92 : 0.08;
+            const style = { "--heatmap-alpha": intensity, "--heatmap-value": cell.value } as CSSProperties;
+            return <div key={`${cell.day}-${cell.hour}`} className={styles.heatmapCell} style={style} title={`${cell.day} ${String(cell.hour).padStart(2, "0")}:00 · ${formatter(cell.value)}`} />;
+          }),
+        ])}
       </div>
       <div className={styles.heatmapLegend}><span>Menor</span><i /><span>Mayor</span></div>
     </div>
