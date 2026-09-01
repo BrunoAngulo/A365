@@ -1429,6 +1429,8 @@ export default function Home() {
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>(null);
   const [expandedChart, setExpandedChart] = useState<ChartKind | null>(null);
   const [dateMode, setDateMode] = useState<DateMode>("week");
+  const [callStartDate, setCallStartDate] = useState("");
+  const [callEndDate, setCallEndDate] = useState("");
   const [emailHeatmapMode, setEmailHeatmapMode] = useState<EmailHeatmapMode>("volume");
   const [activeView, setActiveView] = useState<DashboardView>("calls");
   const [reportStartDate, setReportStartDate] = useState(todayInputValue);
@@ -1451,13 +1453,17 @@ export default function Home() {
   const [incidentError, setIncidentError] = useState("");
   const [isFiltering, startFilterTransition] = useTransition();
 
-  const filterIndex = useMemo(() => buildFilterIndex(rows), [rows]);
+  const dateFilteredRows = useMemo(
+    () => rows.filter((row) => (!callStartDate || row.date >= callStartDate) && (!callEndDate || row.date <= callEndDate)),
+    [callEndDate, callStartDate, rows],
+  );
+  const filterIndex = useMemo(() => buildFilterIndex(dateFilteredRows), [dateFilteredRows]);
   const fullSummary = useMemo(() => buildDashboardSummary(rows), [rows]);
   const detailColumns = useMemo(() => visibleDetailColumns(columns), [columns]);
-  const visibleRows = useMemo(() => rowsForFilter(rows, filterIndex, activeFilter), [activeFilter, filterIndex, rows]);
+  const visibleRows = useMemo(() => rowsForFilter(dateFilteredRows, filterIndex, activeFilter), [activeFilter, dateFilteredRows, filterIndex]);
   const currentSummary = useMemo(
-    () => (activeFilter ? buildDashboardSummary(visibleRows) : fullSummary),
-    [activeFilter, fullSummary, visibleRows],
+    () => buildDashboardSummary(visibleRows),
+    [visibleRows],
   );
   const byDate = dateMode === "week" ? currentSummary.byWeek : dateMode === "month" ? currentSummary.byMonth : currentSummary.byDate;
   const byHour = currentSummary.byHour;
@@ -2315,6 +2321,12 @@ export default function Home() {
                 onChange={(event) => handleFiles(event.target.files)}
               />
             </div>
+            <div className={styles.callDateFilter}>
+              <span>Filtrar intervalo de fechas</span>
+              <label>Desde<input type="date" value={callStartDate} onChange={(event) => setCallStartDate(event.target.value)} /></label>
+              <label>Hasta<input type="date" value={callEndDate} onChange={(event) => setCallEndDate(event.target.value)} /></label>
+              {(callStartDate || callEndDate) ? <button type="button" onClick={() => { setCallStartDate(""); setCallEndDate(""); }}>Limpiar</button> : null}
+            </div>
           </section>
 
           {error ? <div className={styles.error} onClick={stopInsideClick}>{error}</div> : null}
@@ -2324,7 +2336,7 @@ export default function Home() {
               <FileSpreadsheet size={18} aria-hidden="true" />
               <span>{fileName}</span>
               <strong>
-                {visibleRows.length.toLocaleString("es-PE")} de {rows.length.toLocaleString("es-PE")} registros
+                {visibleRows.length.toLocaleString("es-PE")} de {dateFilteredRows.length.toLocaleString("es-PE")} registros
               </strong>
             </section>
           ) : (
