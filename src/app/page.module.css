@@ -907,6 +907,21 @@
   touch-action: pan-y;
 }
 
+.reportPanel > div:first-child {
+  grid-column: 1 / -1;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #f7dce7;
+}
+
+.reportPanel > .reportForm,
+.reportPanel > .inlineUpload {
+  grid-column: 1 / -1;
+}
+
+.reportPanel > .inlineUpload {
+  margin-top: 2px;
+}
+
 .heatmapWrap {
   overflow-x: auto;
   padding: 4px 2px 0;
