@@ -85,7 +85,6 @@ type ChartKind = "date" | "hour" | "status" | "campaign";
 type DateMode = "week" | "month" | "total";
 type DashboardView = "calls" | "matrix" | "errors" | "performance";
 type TimelineScale = "30m" | "1h" | "day";
-type EmailHeatmapMode = "volume" | "assign" | "resolve";
 
 type ActiveFilter = {
   field: FilterField;
@@ -291,23 +290,8 @@ function buildCallHeatmap(rows: MetricRow[]) {
   return buildHeatmapCells(rows.map((row) => ({ date: row.date, hour: row.hour })));
 }
 
-function buildEmailHeatmap(rows: MatrixRow[], mode: EmailHeatmapMode) {
-  const cells = buildHeatmapCells(
-    rows.map((row) => {
-      const timestamp = [row.dateEmail, row.fechaAsignacion, row.fechaRegistro].find((value) => heatmapHour(value) !== null) ?? (row.dateEmail || row.fechaAsignacion || row.fechaRegistro);
-      return {
-        date: timestamp,
-        hour: timestamp,
-        value: mode === "assign" ? row.minutesToAssign ?? 0 : mode === "resolve" ? row.minutesToRegister ?? 0 : 1,
-      };
-    }),
-  );
-  if (mode !== "volume") {
-    cells.forEach((cell) => {
-      if (cell.count) cell.value /= cell.count;
-    });
-  }
-  return cells;
+function buildEmailHeatmap(rows: MatrixRow[]) {
+  return buildHeatmapCells(rows.map((row) => ({ date: row.dateEmail, hour: row.dateEmail, value: 1 })));
 }
 
 function HeatmapGrid({ cells, formatter }: { cells: HeatmapCell[]; formatter: (value: number) => string }) {
@@ -1431,7 +1415,6 @@ export default function Home() {
   const [dateMode, setDateMode] = useState<DateMode>("week");
   const [callStartDate, setCallStartDate] = useState("");
   const [callEndDate, setCallEndDate] = useState("");
-  const [emailHeatmapMode, setEmailHeatmapMode] = useState<EmailHeatmapMode>("volume");
   const [activeView, setActiveView] = useState<DashboardView>("calls");
   const [reportStartDate, setReportStartDate] = useState(todayInputValue);
   const [reportEndDate, setReportEndDate] = useState(todayInputValue);
@@ -1483,7 +1466,7 @@ export default function Home() {
   );
   const visibleMatrixRows = showSlowResolutionOnly ? slowResolutionRows : matrixRows;
   const matrixSummary = useMemo(() => buildMatrixSummary(visibleMatrixRows), [visibleMatrixRows]);
-  const emailHeatmap = useMemo(() => buildEmailHeatmap(visibleMatrixRows, emailHeatmapMode), [emailHeatmapMode, visibleMatrixRows]);
+  const emailHeatmap = useMemo(() => buildEmailHeatmap(visibleMatrixRows), [visibleMatrixRows]);
   const matrixDetailRows = useMemo(() => visibleMatrixRows.slice(0, detailRowLimit), [visibleMatrixRows]);
   const hiddenMatrixRows = Math.max(0, visibleMatrixRows.length - matrixDetailRows.length);
   const timelineDays = useMemo(() => timelineDaysFromRows(visibleMatrixRows), [visibleMatrixRows]);
@@ -2448,20 +2431,11 @@ export default function Home() {
           <div className={styles.matrixGrid}>
             <ChartPanel
               title="Mapa de calor I2"
-              meta="Correos por día y hora"
-              actions={
-                <div className={styles.heatmapModes} role="group" aria-label="Métrica del mapa de calor I2">
-                  {(["volume", "assign", "resolve"] as EmailHeatmapMode[]).map((mode) => (
-                    <button key={mode} type="button" className={emailHeatmapMode === mode ? styles.heatmapModeActive : ""} onClick={() => setEmailHeatmapMode(mode)}>
-                      {mode === "volume" ? "Volumen" : mode === "assign" ? "Asignación" : "Resolución"}
-                    </button>
-                  ))}
-                </div>
-              }
+              meta="Correos recibidos por día y hora"
             >
               <HeatmapGrid
                 cells={emailHeatmap}
-                formatter={(value) => emailHeatmapMode === "volume" ? `${value.toLocaleString("es-PE")} correos` : `${Math.round(value).toLocaleString("es-PE")} min`}
+                formatter={(value) => `${value.toLocaleString("es-PE")} correos recibidos`}
               />
             </ChartPanel>
             <ChartPanel
