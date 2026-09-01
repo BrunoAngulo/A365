@@ -850,6 +850,102 @@
   touch-action: pan-y;
 }
 
+.heatmapWrap {
+  overflow-x: auto;
+  padding: 4px 2px 0;
+}
+
+.heatmapGrid {
+  display: grid;
+  grid-template-columns: 38px repeat(24, minmax(18px, 1fr));
+  grid-template-rows: 24px repeat(7, 30px);
+  gap: 4px;
+  min-width: 620px;
+}
+
+.heatmapCorner,
+.heatmapAxis {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.heatmapCell {
+  position: relative;
+  min-width: 0;
+  border: 1px solid rgba(190, 24, 93, 0.1);
+  border-radius: 6px;
+  background: rgba(236, 72, 153, var(--heatmap-alpha));
+  cursor: help;
+  transition: transform 140ms ease, box-shadow 140ms ease;
+}
+
+.heatmapCell:hover {
+  z-index: 1;
+  transform: scale(1.12);
+  box-shadow: 0 4px 12px rgba(190, 24, 93, 0.24);
+}
+
+.heatmapRowLabel {
+  position: absolute;
+  right: calc(100% + 8px);
+  top: 50%;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  transform: translateY(-50%);
+}
+
+.heatmapLegend {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.heatmapLegend i {
+  display: inline-block;
+  width: 90px;
+  height: 8px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(236, 72, 153, 0.08), rgba(236, 72, 153, 1));
+}
+
+.heatmapModes {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--pink-50);
+}
+
+.heatmapModes button {
+  min-height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 999px;
+  color: var(--muted);
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.heatmapModes button:hover,
+.heatmapModes .heatmapModeActive {
+  color: var(--pink-700);
+  background: #ffffff;
+  box-shadow: 0 3px 10px rgba(236, 72, 153, 0.14);
+}
+
 .chartStack {
   display: grid;
   gap: 14px;

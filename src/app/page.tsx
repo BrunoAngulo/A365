@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import type { FormEvent, MouseEvent as ReactMouseEvent, ReactNode, RefObject } from "react";
+import type { CSSProperties, FormEvent, MouseEvent as ReactMouseEvent, ReactNode, RefObject } from "react";
 import {
   Bar,
   BarChart,
@@ -85,6 +85,7 @@ type ChartKind = "date" | "hour" | "status" | "campaign";
 type DateMode = "week" | "month" | "total";
 type DashboardView = "calls" | "matrix" | "errors" | "performance";
 type TimelineScale = "30m" | "1h" | "day";
+type EmailHeatmapMode = "volume" | "assign" | "resolve";
 
 type ActiveFilter = {
   field: FilterField;
@@ -252,6 +253,84 @@ const chartColors = [
   "#bae6fd",
   "#bbf7d0",
 ];
+
+const heatmapDays = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+
+type HeatmapCell = { day: string; hour: number; value: number; count: number };
+
+function heatmapDayIndex(value: string) {
+  const date = parseDateTimeValue(value);
+  if (!date) return null;
+  const day = date.getDay();
+  return day === 0 ? 6 : day - 1;
+}
+
+function heatmapHour(value: string) {
+  const match = valueAsText(value).match(/(?:T|\s|^)(\d{1,2})(?::\d{2})?/);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  return hour >= 0 && hour <= 23 ? hour : null;
+}
+
+function buildHeatmapCells(rows: Array<{ date: string; hour?: string; value?: number }>) {
+  const cells = heatmapDays.flatMap((day) =>
+    Array.from({ length: 24 }, (_, hour) => ({ day, hour, value: 0, count: 0 })),
+  );
+  rows.forEach((row) => {
+    const dayIndex = heatmapDayIndex(row.date);
+    const hour = heatmapHour(row.hour ?? row.date);
+    if (dayIndex === null || hour === null) return;
+    const cell = cells[dayIndex * 24 + hour];
+    cell.value += row.value ?? 1;
+    cell.count += 1;
+  });
+  return cells;
+}
+
+function buildCallHeatmap(rows: MetricRow[]) {
+  return buildHeatmapCells(rows.map((row) => ({ date: row.date, hour: row.hour })));
+}
+
+function buildEmailHeatmap(rows: MatrixRow[], mode: EmailHeatmapMode) {
+  const cells = buildHeatmapCells(
+    rows.map((row) => {
+      const timestamp = [row.dateEmail, row.fechaAsignacion, row.fechaRegistro].find((value) => heatmapHour(value) !== null) ?? (row.dateEmail || row.fechaAsignacion || row.fechaRegistro);
+      return {
+        date: timestamp,
+        hour: timestamp,
+        value: mode === "assign" ? row.minutesToAssign ?? 0 : mode === "resolve" ? row.minutesToRegister ?? 0 : 1,
+      };
+    }),
+  );
+  if (mode !== "volume") {
+    cells.forEach((cell) => {
+      if (cell.count) cell.value /= cell.count;
+    });
+  }
+  return cells;
+}
+
+function HeatmapGrid({ cells, formatter }: { cells: HeatmapCell[]; formatter: (value: number) => string }) {
+  const max = Math.max(...cells.map((cell) => cell.value), 0);
+  return (
+    <div className={styles.heatmapWrap}>
+      <div className={styles.heatmapGrid}>
+        <div className={styles.heatmapCorner} />
+        {Array.from({ length: 24 }, (_, hour) => <span key={hour} className={styles.heatmapAxis}>{String(hour).padStart(2, "0")}</span>)}
+        {cells.map((cell) => {
+          const intensity = max ? 0.08 + (cell.value / max) * 0.92 : 0.08;
+          const style = { "--heatmap-alpha": intensity, "--heatmap-value": cell.value } as CSSProperties;
+          return (
+            <div key={`${cell.day}-${cell.hour}`} className={styles.heatmapCell} style={style} title={`${cell.day} ${String(cell.hour).padStart(2, "0")}:00 · ${formatter(cell.value)}`}>
+              {cell.hour === 0 ? <span className={styles.heatmapRowLabel}>{cell.day}</span> : null}
+            </div>
+          );
+        })}
+      </div>
+      <div className={styles.heatmapLegend}><span>Menor</span><i /><span>Mayor</span></div>
+    </div>
+  );
+}
 
 const columnAliases = {
   date: ["date", "fecha", "created_at", "createdat", "call_date", "call date", "fecha_creacion", "created"],
@@ -1298,12 +1377,14 @@ function ChartPanel({
   children,
   onExpand,
   onExport,
+  actions,
 }: {
   title: string;
   meta: string;
   children: ReactNode;
   onExpand?: () => void;
   onExport?: () => void;
+  actions?: ReactNode;
 }) {
   return (
     <article className={styles.panel} onClick={stopInsideClick}>
@@ -1312,8 +1393,9 @@ function ChartPanel({
           <h2>{title}</h2>
           <span>{meta}</span>
         </div>
-        {onExport || onExpand ? (
+        {actions || onExport || onExpand ? (
           <div className={styles.headerActions}>
+            {actions}
             {onExport ? (
               <button className={styles.iconButton} type="button" onClick={onExport} aria-label={`Exportar ${title} como imagen`} title={`Exportar ${title} como imagen`}>
                 <Download size={17} aria-hidden="true" />
@@ -1348,6 +1430,7 @@ export default function Home() {
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>(null);
   const [expandedChart, setExpandedChart] = useState<ChartKind | null>(null);
   const [dateMode, setDateMode] = useState<DateMode>("week");
+  const [emailHeatmapMode, setEmailHeatmapMode] = useState<EmailHeatmapMode>("volume");
   const [activeView, setActiveView] = useState<DashboardView>("calls");
   const [reportStartDate, setReportStartDate] = useState(todayInputValue);
   const [reportEndDate, setReportEndDate] = useState(todayInputValue);
@@ -1383,6 +1466,7 @@ export default function Home() {
   const byStatus = currentSummary.byStatus;
   const byCampaign = currentSummary.byCampaign;
   const byUser = currentSummary.byUser;
+  const callHeatmap = useMemo(() => buildCallHeatmap(visibleRows), [visibleRows]);
   const detailStatuses = byStatus.slice(0, 4);
   const detailCampaigns = byCampaign.slice(0, 4);
   const detailUsers = byUser.slice(0, 4);
@@ -1394,6 +1478,7 @@ export default function Home() {
   );
   const visibleMatrixRows = showSlowResolutionOnly ? slowResolutionRows : matrixRows;
   const matrixSummary = useMemo(() => buildMatrixSummary(visibleMatrixRows), [visibleMatrixRows]);
+  const emailHeatmap = useMemo(() => buildEmailHeatmap(visibleMatrixRows, emailHeatmapMode), [emailHeatmapMode, visibleMatrixRows]);
   const matrixDetailRows = useMemo(() => visibleMatrixRows.slice(0, detailRowLimit), [visibleMatrixRows]);
   const hiddenMatrixRows = Math.max(0, visibleMatrixRows.length - matrixDetailRows.length);
   const timelineDays = useMemo(() => timelineDaysFromRows(visibleMatrixRows), [visibleMatrixRows]);
@@ -2351,6 +2436,24 @@ export default function Home() {
 
           <div className={styles.matrixGrid}>
             <ChartPanel
+              title="Mapa de calor I2"
+              meta="Correos por día y hora"
+              actions={
+                <div className={styles.heatmapModes} role="group" aria-label="Métrica del mapa de calor I2">
+                  {(["volume", "assign", "resolve"] as EmailHeatmapMode[]).map((mode) => (
+                    <button key={mode} type="button" className={emailHeatmapMode === mode ? styles.heatmapModeActive : ""} onClick={() => setEmailHeatmapMode(mode)}>
+                      {mode === "volume" ? "Volumen" : mode === "assign" ? "Asignación" : "Resolución"}
+                    </button>
+                  ))}
+                </div>
+              }
+            >
+              <HeatmapGrid
+                cells={emailHeatmap}
+                formatter={(value) => emailHeatmapMode === "volume" ? `${value.toLocaleString("es-PE")} correos` : `${Math.round(value).toLocaleString("es-PE")} min`}
+              />
+            </ChartPanel>
+            <ChartPanel
               title="Promedio por agente"
               meta={`${matrixSummary.avgByAgent.length} agentes`}
             >
@@ -2686,6 +2789,12 @@ export default function Home() {
           <div ref={campaignChartRef} className={styles.exportFrame}>
             {renderCampaignChart()}
           </div>
+        </ChartPanel>
+      </section>
+
+      <section className={styles.dashboardGrid} onClick={stopInsideClick}>
+        <ChartPanel title="Mapa de calor I1" meta="Llamadas por día y hora">
+          <HeatmapGrid cells={callHeatmap} formatter={(value) => `${value.toLocaleString("es-PE")} llamadas`} />
         </ChartPanel>
       </section>
 
