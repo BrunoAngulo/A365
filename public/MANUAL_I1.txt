@@ -1,0 +1,144 @@
+MANUAL I1 - LLAMADAS INBOUND
+================================
+
+1. OBJETIVO DEL INDICADOR
+--------------------------
+El I1 permite analizar el volumen y la eficiencia de las llamadas inbound del archivo cargado. El tablero usa la misma base filtrada para todos sus indicadores, de manera que una seleccion de fecha, campana, categoria u hora se refleja en las tarjetas, graficos y tabla de datos crudos.
+
+2. ARCHIVO Y CARGA DE DATOS
+----------------------------
+Se puede cargar un TXT, CSV o Excel con encabezados. Al leer el archivo, la aplicacion:
+
+- identifica los encabezados aunque lleguen con mayusculas, espacios o guiones bajos;
+- convierte call_date a fecha y hora para los graficos temporales;
+- convierte length_in_sec a numero y usa cero cuando el valor esta vacio o no es valido;
+- conserva la fila original para mostrarla en Datos crudos filtrados;
+- excluye siempre las filas cuyo campaign_id sea LINDESAC, sin importar mayusculas o minusculas.
+
+Campos principales utilizados:
+
+- call_date: fecha y hora de ingreso de la llamada;
+- length_in_sec: duracion de la llamada en segundos;
+- status_name: categoria o resultado de la llamada;
+- campaign_id: campana a la que pertenece el registro;
+- list_name: lista de origen del registro;
+- user: usuario o agente que gestiono la llamada;
+- lead_id: identificador del contacto, util para revisar duplicados y trazabilidad.
+
+3. FILTROS Y COMPORTAMIENTO
+----------------------------
+Los filtros son acumulativos. Por ejemplo, si se elige agosto, una campana y una categoria, todos los graficos muestran solamente las filas que cumplen las tres condiciones.
+
+Los filtros disponibles pueden incluir intervalo de fechas, mes, hora, status_name, campaign_id, list_name y usuario. Cada grafico mantiene su propio foco visual: al seleccionar una categoria, las otras no se eliminan; permanecen visibles y se muestran atenuadas. Si una categoria no existe en un mes, ese mes conserva su lugar y se representa con valor cero o sin barra, evitando interpretar que hubo actividad.
+
+4. LLAMADAS RECIBIDAS
+----------------------
+Campo principal: call_date.
+
+Formula:
+    llamadas recibidas = cantidad de filas inbound validas
+
+Se incluyen llamadas atendidas y no atendidas. Primero se excluyen las campanas LINDESAC y luego se cuentan las filas que quedan dentro del filtro activo. Por eso este total no debe definirse a partir de length_in_sec ni solamente de status_name.
+
+5. LLAMADAS ATENDIDAS
+----------------------
+Campo principal: length_in_sec.
+
+Regla de negocio actual:
+    una llamada es atendida si length_in_sec > 0
+
+El filtro de status_name puede restringir el subconjunto mostrado, pero una duracion positiva es la condicion base para marcar una llamada como atendida. Si la duracion es cero, vacia o invalida, la llamada se considera no atendida para este indicador.
+
+6. NIVEL DE ATENCION (NA)
+--------------------------
+Que mide: que porcentaje de llamadas recibidas fue atendido.
+
+Formula:
+    NA = llamadas atendidas / llamadas recibidas x 100
+
+Ejemplo: si ingresan 100 llamadas y 93 tienen length_in_sec mayor que cero, el NA es 93%. La referencia operativa mostrada es NA >= 90%. Si no existen llamadas recibidas, se muestra N/D para no dividir entre cero.
+
+7. ABANDONO
+------------
+Que mide: llamadas recibidas que no fueron atendidas.
+
+Formulas:
+    llamadas abandonadas = recibidas - atendidas
+    abandono (%) = abandonadas / recibidas x 100
+
+El sistema limita el resultado a un rango valido de 0% a 100%. Si los datos filtrados no tienen llamadas, se muestra N/D. Si recibidas y atendidas son iguales, el abandono correcto es 0%; si son diferentes, el porcentaje se actualiza en todas las vistas.
+
+8. TMO PROMEDIO
+----------------
+TMO significa Tiempo Medio de Operacion. Se calcula unicamente sobre llamadas atendidas:
+
+    TMO (segundos) = suma de length_in_sec atendidas / cantidad de atendidas
+
+El resultado se presenta en formato minutos:segundos, por ejemplo 04:14. Las filas con duracion cero no entran en el promedio de TMO.
+
+9. LLAMADAS POR MES
+-------------------
+Campo: call_date.
+
+La fecha se agrupa por ano y mes (por ejemplo, junio 2026). El grafico muestra recibidas, atendidas y, cuando corresponde, llamadas atendidas con mas de 20 segundos. El conteo no usa lead_id para decidir el mes: el periodo siempre sale de call_date. Si un filtro no tiene datos en un mes, el mes permanece visible con cero.
+
+10. LLAMADAS POR HORA
+---------------------
+Campo: hora extraida de call_date.
+
+Cada fila se suma a la hora en la que ingreso, de 00:00 a 23:00. El grafico sirve para identificar picos de demanda y se recalcula con el intervalo de fechas, categoria, campana y usuario seleccionados.
+
+11. CATEGORIAS / STATUS_NAME
+----------------------------
+Campo: status_name.
+
+La lista muestra cada estado, su cantidad y su porcentaje sobre el total filtrado. Por defecto todos los estados estan seleccionados. Al hacer clic en uno, ese estado queda en foco y los demas se atenúan sin borrarse. El total seleccionado se calcula con las filas que pertenecen al foco activo.
+
+12. CAMPANAS Y LISTAS
+---------------------
+Campos: campaign_id y list_name.
+
+Campañas agrupa el volumen por campaign_id y excluye LINDESAC. La distribucion por list_name identifica las listas de origen. Ambos graficos respetan los filtros globales y permiten comparar donde se concentra el volumen inbound.
+
+13. MAPA DE CALOR I1
+--------------------
+Campos: call_date y hora.
+
+Las filas se agrupan por dia de semana y hora para mostrar la intensidad de llamadas. Solo se presenta el horario operativo de 07:00 a 23:00; las horas restantes no se muestran. Un color mas intenso representa mayor cantidad de llamadas en esa combinacion de dia y hora.
+
+14. DISTRIBUCION DE DURACION
+----------------------------
+Campo: length_in_sec.
+
+Las llamadas se agrupan en rangos para distinguir duraciones breves y conversaciones largas:
+
+    0 segundos, 1-20, 21-60, 61-180, 181-300 y mas de 300 segundos.
+
+La distribucion ayuda a detectar llamadas que terminaron sin conversacion, llamadas cortas y oportunidades de analizar la calidad de la atencion.
+
+15. RENDIMIENTO POR USUARIO
+---------------------------
+Campos: user y length_in_sec.
+
+Para cada usuario se comparan llamadas recibidas, llamadas atendidas, porcentaje de atencion y TMO. Al hacer clic en un usuario, los datos filtrados y los demas graficos se recalculan para revisar su comportamiento dentro del mismo periodo y filtros activos.
+
+16. DATOS CRUDOS FILTRADOS
+--------------------------
+Esta tabla no es una muestra inventada: contiene las filas originales que quedan despues de aplicar todos los filtros. Sirve para auditar los totales de los graficos y revisar campos como call_date, campaign_id, status_name, user, lead_id y length_in_sec.
+
+17. NIVEL DE SERVICIO
+---------------------
+El archivo inbound contiene duracion de llamada, pero no un campo confiable de espera en cola o tiempo hasta contestar (por ejemplo wait_time, queue_time o answer_seconds). Por esa razon el Nivel de Servicio se muestra como N/D y no se calcula usando length_in_sec: la duracion de conversacion no es tiempo de espera.
+
+18. VALIDACIONES E INTERPRETACION
+---------------------------------
+Antes de mostrar los resultados se comprueba que:
+
+- atendidas no supere a recibidas;
+- abandonadas no sea negativa;
+- NA y abandono esten entre 0% y 100%;
+- TMO use solamente duraciones validas de llamadas atendidas;
+- LINDESAC no aparezca en los resultados;
+- los meses sin registros permanezcan visibles con cero cuando existe un filtro activo.
+
+Si un encabezado requerido no existe o no se puede interpretar, el indicador correspondiente se muestra como N/D o Sin dato. Para validar un resultado, compara la tarjeta con Datos crudos filtrados y revisa primero el intervalo de fechas, campaign_id, status_name y length_in_sec.

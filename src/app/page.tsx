@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, FormEvent, MouseEvent as ReactMouseEvent, ReactNode, RefObject } from "react";
 import {
   Bar,
@@ -26,6 +26,7 @@ import {
   Download,
   FileSpreadsheet,
   Hash,
+  Info,
   ListFilter,
   Mail,
   Maximize2,
@@ -72,6 +73,11 @@ type MetricRow = {
   user: string;
   campaignId: string;
   statusName: string;
+  listName: string;
+  direction: string;
+  durationSeconds: number;
+  leadId: string;
+  waitSeconds: number | null;
   raw: Record<string, string>;
 };
 
@@ -80,24 +86,17 @@ type ChartPoint = {
   total: number;
 };
 
-type FilterField = "date" | "week" | "month" | "hour" | "statusName" | "campaignId" | "user";
+type UserPerformancePoint = { name: string; received: number; attended: number; attentionRate: number };
+
+type FilterField = "date" | "week" | "month" | "hour" | "statusName" | "campaignId" | "user" | "listName";
 type ChartKind = "date" | "hour" | "status" | "campaign";
-type DateMode = "week" | "month" | "total";
 type DashboardView = "calls" | "matrix" | "errors" | "performance";
 type TimelineScale = "30m" | "1h" | "day";
-
-type ActiveFilter = {
-  field: FilterField;
-  label: string;
-  value: string;
-} | null;
 
 type ChartClickState = {
   activeLabel?: string | number;
   activePayload?: Array<{ payload?: ChartPoint; name?: string | number; value?: string | number }>;
 };
-
-type FilterIndex = Record<FilterField, Map<string, MetricRow[]>>;
 
 type DashboardSummary = {
   total: number;
@@ -106,12 +105,14 @@ type DashboardSummary = {
   byMonth: ChartPoint[];
   byHour: ChartPoint[];
   byStatus: ChartPoint[];
+  byListName: ChartPoint[];
   byCampaign: ChartPoint[];
   byUser: ChartPoint[];
   uniquePhones: number;
   uniqueUsers: number;
   uniqueCampaigns: number;
   uniqueStatuses: number;
+  attendedCalls: number;
 };
 
 type MatrixRow = {
@@ -227,7 +228,7 @@ type AgentTimeline = {
 };
 
 const detailRowLimit = 500;
-const filterFields: FilterField[] = ["date", "week", "month", "hour", "statusName", "campaignId", "user"];
+const filterFields: FilterField[] = ["date", "week", "month", "hour", "statusName", "campaignId", "user", "listName"];
 const todayInputValue = formatLocalDate(new Date());
 const slaStartMinutes = 7 * 60;
 const slaEndMinutes = 23 * 60 + 1;
@@ -239,21 +240,42 @@ const timelineScales: Array<{ value: TimelineScale; label: string }> = [
 ];
 
 const chartColors = [
-  "#f9a8d4",
-  "#fbcfe8",
-  "#f472b6",
-  "#f0abfc",
-  "#e9d5ff",
-  "#fecdd3",
-  "#fda4af",
-  "#f5d0fe",
-  "#ddd6fe",
-  "#fed7aa",
-  "#bae6fd",
-  "#bbf7d0",
+  "#1d4ed8",
+  "#3b82f6",
+  "#0f766e",
+  "#0891b2",
+  "#475569",
+  "#64748b",
+  "#0284c7",
+  "#0e7490",
+  "#334155",
+  "#0369a1",
+  "#1e40af",
+  "#166534",
 ];
 
 const heatmapDays = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+const heatmapStartHour = 7;
+const heatmapEndHour = 23;
+const persistedCallsKey = "a365-i1-calls-v1";
+
+type PersistedCalls = { fileName: string; columns: string[]; rows: MetricRow[] };
+
+function readPersistedCalls(): PersistedCalls | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(persistedCallsKey) ?? "null") as Partial<PersistedCalls> | null;
+    return parsed && Array.isArray(parsed.rows) && parsed.rows.length
+      ? { fileName: parsed.fileName || "Archivo recuperado", columns: parsed.columns ?? Object.keys(parsed.rows[0]?.raw ?? {}), rows: parsed.rows }
+      : null;
+  } catch {
+    return null;
+  }
+}
+const heatmapHours = Array.from(
+  { length: heatmapEndHour - heatmapStartHour + 1 },
+  (_, offset) => heatmapStartHour + offset,
+);
 
 type HeatmapCell = { day: string; hour: number; value: number; count: number };
 
@@ -273,13 +295,13 @@ function heatmapHour(value: string) {
 
 function buildHeatmapCells(rows: Array<{ date: string; hour?: string; value?: number }>) {
   const cells = heatmapDays.flatMap((day) =>
-    Array.from({ length: 24 }, (_, hour) => ({ day, hour, value: 0, count: 0 })),
+    heatmapHours.map((hour) => ({ day, hour, value: 0, count: 0 })),
   );
   rows.forEach((row) => {
     const dayIndex = heatmapDayIndex(row.date);
     const hour = heatmapHour(row.hour ?? row.date);
-    if (dayIndex === null || hour === null) return;
-    const cell = cells[dayIndex * 24 + hour];
+    if (dayIndex === null || hour === null || hour < heatmapStartHour || hour > heatmapEndHour) return;
+    const cell = cells[dayIndex * heatmapHours.length + hour - heatmapStartHour];
     cell.value += row.value ?? 1;
     cell.count += 1;
   });
@@ -300,10 +322,10 @@ function HeatmapGrid({ cells, formatter }: { cells: HeatmapCell[]; formatter: (v
     <div className={styles.heatmapWrap}>
       <div className={styles.heatmapGrid}>
         <div className={styles.heatmapCorner}>Día / hora</div>
-        {Array.from({ length: 24 }, (_, hour) => <span key={hour} className={styles.heatmapAxis}>{String(hour).padStart(2, "0")}</span>)}
+        {heatmapHours.map((hour) => <span key={hour} className={styles.heatmapAxis}>{String(hour).padStart(2, "0")}</span>)}
         {heatmapDays.flatMap((day, dayIndex) => [
           <span key={`${day}-label`} className={styles.heatmapRowLabel}>{day}</span>,
-          ...cells.slice(dayIndex * 24, dayIndex * 24 + 24).map((cell) => {
+          ...cells.slice(dayIndex * heatmapHours.length, dayIndex * heatmapHours.length + heatmapHours.length).map((cell) => {
             const intensity = max ? 0.08 + (cell.value / max) * 0.92 : 0.08;
             const style = { "--heatmap-alpha": intensity, "--heatmap-value": cell.value } as CSSProperties;
             return <div key={`${cell.day}-${cell.hour}`} className={styles.heatmapCell} style={style} title={`${cell.day} ${String(cell.hour).padStart(2, "0")}:00 · ${formatter(cell.value)}`} />;
@@ -322,46 +344,44 @@ const columnAliases = {
   user: ["user", "usuario", "agent", "asesor", "owner", "ejecutivo", "username", "user_name", "user name"],
   campaignId: ["campaign_id", "campaign id", "campaign", "campaña", "campana", "id_campana", "id campaña"],
   statusName: ["status_name", "status name", "estado_nombre", "nombre_estado"],
+  listName: ["list_name", "list name", "lista", "nombre_lista", "nombre lista"],
+  direction: ["direction", "call_direction", "call direction", "direccion", "dirección"],
+  durationSeconds: ["length_in_sec", "length in sec", "talk_time", "talk time"],
+  leadId: ["lead_id", "lead id"],
+  waitSeconds: ["wait_time", "queue_time", "answer_time", "ring_time", "answer_seconds", "queue_seconds", "time_to_answer"],
 };
 
-const hiddenDetailColumns = new Set(
-  [
-    "status",
-    "user",
-    "vendor_lead_code",
-    "source_id",
-    "list_id",
-    "gmt_offset_now",
-    "phone_code",
-    "phone_number",
-    "title",
-    "first_name",
-    "middle_initial",
-    "last_name",
-    "address1",
-    "address2",
-    "address3",
-    "city",
-    "state",
-    "province",
-    "postal_code",
-    "country_code",
-    "gender",
-    "date_of_birth",
-    "alt_phone",
-    "email",
-    "security_phrase",
-    "comments",
-    "length_in_sec",
-    "user_group",
-    "alt_dial",
-    "rank",
-    "owner",
-    "lead_id",
-    "list_name",
-    "list_description",
-  ].map(normalizeKey),
-);
+type EmailMonthPoint = { name: string; received: number; attended: number; withinSla: number; nda: number; nds: number; tmoMinutes: number | null };
+type EmailSummary = { received: number; attended: number; withinSla: number; nda: number; nds: number; tmoMinutes: number | null; byMonth: EmailMonthPoint[]; byUser: ChartPoint[]; byTipificacion: ChartPoint[]; byMotivo: ChartPoint[]; byHour: ChartPoint[]; period: string };
+
+const EMAIL_SLA_MINUTES = 60;
+
+type MonthlyCallPoint = {
+  name: string;
+  received: number;
+  attended: number;
+  attendedOver20: number;
+};
+
+type ServiceMonthlyPoint = {
+  name: string;
+  received: number;
+  attended: number;
+  attendedUnder20: number;
+  abandoned: number;
+  attentionRate: number;
+  serviceRate: number | null;
+  abandonmentRate: number;
+  averageDurationSeconds: number;
+};
+
+type ServiceSummary = {
+  attentionRate: number;
+  serviceRate: number | null;
+  abandonmentRate: number;
+  averageDurationSeconds: number;
+  byMonth: ServiceMonthlyPoint[];
+};
 
 const matrixColumnAliases = {
   subjectEmail: ["subject_email", "subject email", "asunto"],
@@ -428,6 +448,11 @@ function valueAsText(value: unknown) {
   return String(value).trim();
 }
 
+function secondsFromValue(value: unknown) {
+  const seconds = Number(valueAsText(value).replace(",", "."));
+  return Number.isFinite(seconds) && seconds >= 0 ? seconds : 0;
+}
+
 function formatDateTimeMinute(value: unknown) {
   const text = valueAsText(value);
   const parsed = parseDateParts(text, "");
@@ -453,11 +478,6 @@ function displayCellValue(column: string, value: string) {
   }
 
   return value;
-}
-
-function visibleDetailColumns(columns: string[]) {
-  const visibleColumns = columns.filter((column) => !hiddenDetailColumns.has(normalizeKey(column)));
-  return visibleColumns.length ? visibleColumns : columns;
 }
 
 function formatLocalDate(value: Date) {
@@ -562,6 +582,11 @@ function mapRows(rows: RawRow[]) {
     user: findColumn(headers, columnAliases.user),
     campaignId: findColumn(headers, columnAliases.campaignId),
     statusName: findColumn(headers, columnAliases.statusName),
+    listName: findColumn(headers, columnAliases.listName),
+    direction: findColumn(headers, columnAliases.direction),
+    durationSeconds: findColumn(headers, columnAliases.durationSeconds),
+    leadId: findColumn(headers, columnAliases.leadId),
+    waitSeconds: findColumn(headers, columnAliases.waitSeconds),
   };
 
   return rows.map((row, index) => {
@@ -581,6 +606,11 @@ function mapRows(rows: RawRow[]) {
       user: valueAsText(columns.user ? row[columns.user] : "") || "Sin usuario",
       campaignId: valueAsText(columns.campaignId ? row[columns.campaignId] : "") || "Sin campaign_id",
       statusName: valueAsText(columns.statusName ? row[columns.statusName] : "") || "Sin status_name",
+      listName: valueAsText(columns.listName ? row[columns.listName] : "") || "Sin list_name",
+      direction: valueAsText(columns.direction ? row[columns.direction] : "") || "Sin direction",
+      durationSeconds: secondsFromValue(columns.durationSeconds ? row[columns.durationSeconds] : ""),
+      leadId: valueAsText(columns.leadId ? row[columns.leadId] : ""),
+      waitSeconds: columns.waitSeconds ? secondsFromValue(row[columns.waitSeconds]) : null,
       raw: headers.reduce<Record<string, string>>((record, header) => {
         record[header] = valueAsText(row[header]);
         return record;
@@ -799,6 +829,15 @@ function percentage(numerator: number, denominator: number) {
 
 function formatPercent(value: number) {
   return `${value.toFixed(value >= 10 ? 1 : 2)}%`;
+}
+
+function formatEmailTmo(value: number | null) {
+  return value === null ? "N/D" : `${value.toFixed(2)} min`;
+}
+
+function formatCallDuration(seconds: number) {
+  const safeSeconds = Math.max(0, Math.round(seconds));
+  return `${String(Math.floor(safeSeconds / 60)).padStart(2, "0")}:${String(safeSeconds % 60).padStart(2, "0")}`;
 }
 
 function isTauriRuntime() {
@@ -1186,40 +1225,6 @@ function buildPerformanceSummary(callRows: MetricRow[], emailRows: MatrixRow[], 
   };
 }
 
-function createFilterIndex() {
-  return filterFields.reduce<FilterIndex>((index, field) => {
-    index[field] = new Map();
-    return index;
-  }, {} as FilterIndex);
-}
-
-function buildFilterIndex(rows: MetricRow[]) {
-  const index = createFilterIndex();
-
-  rows.forEach((row) => {
-    filterFields.forEach((field) => {
-      const key = row[field] || "Sin dato";
-      const rowsForKey = index[field].get(key);
-
-      if (rowsForKey) {
-        rowsForKey.push(row);
-      } else {
-        index[field].set(key, [row]);
-      }
-    });
-  });
-
-  return index;
-}
-
-function rowsForFilter(rows: MetricRow[], index: FilterIndex, activeFilter: ActiveFilter) {
-  if (!activeFilter) {
-    return rows;
-  }
-
-  return index[activeFilter.field].get(activeFilter.value) ?? [];
-}
-
 function addToCount(map: Map<string, number>, value: string) {
   const label = value || "Sin dato";
   map.set(label, (map.get(label) ?? 0) + 1);
@@ -1258,6 +1263,137 @@ function hourPointsFromMap(map: Map<string, number>) {
   });
 }
 
+function matrixEmailKey(row: MatrixRow) {
+  return row.idEmail.trim() || `row-${row.id}`;
+}
+
+function isEmailAttended(row: MatrixRow) {
+  const status = normalizeKey(row.estadoRegistro);
+  return Boolean(row.fechaAsignacion || row.fechaRegistro || ["terminado", "completado", "atendido", "resuelto", "cerrado"].some((value) => status.includes(value)));
+}
+
+function buildEmailSummary(rows: MatrixRow[]): EmailSummary {
+  const unique = new Map<string, MatrixRow>();
+  rows.forEach((row) => {
+    const key = matrixEmailKey(row);
+    const previous = unique.get(key);
+    if (!previous || (!previous.fechaRegistro && row.fechaRegistro)) unique.set(key, row);
+  });
+  const calls = Array.from(unique.values());
+  const attended = calls.filter(isEmailAttended);
+  const withinSla = calls.filter((row) => row.minutesToAssign !== null && row.minutesToAssign >= 0 && row.minutesToAssign <= EMAIL_SLA_MINUTES);
+  const validTmo = attended.map((row) => row.minutesToRegister).filter((value): value is number => value !== null && value >= 0);
+  const monthMap = new Map<string, MatrixRow[]>();
+  calls.forEach((row) => {
+    const month = monthKeyFromDateTime(row.dateEmail);
+    monthMap.set(month, [...(monthMap.get(month) ?? []), row]);
+  });
+  const byMonth = Array.from(monthMap.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([name, monthRows]) => {
+    const monthAttended = monthRows.filter(isEmailAttended);
+    const monthSla = monthRows.filter((row) => row.minutesToAssign !== null && row.minutesToAssign >= 0 && row.minutesToAssign <= EMAIL_SLA_MINUTES);
+    const monthTmo = monthAttended.map((row) => row.minutesToRegister).filter((value): value is number => value !== null && value >= 0);
+    return { name, received: monthRows.length, attended: monthAttended.length, withinSla: monthSla.length, nda: percentage(monthAttended.length, monthRows.length), nds: percentage(monthSla.length, monthRows.length), tmoMinutes: monthTmo.length ? monthTmo.reduce((sum, value) => sum + value, 0) / monthTmo.length : null };
+  });
+  const points = (key: keyof MatrixRow) => countMatrixBy(calls, key);
+  const hours = new Map<string, number>();
+  calls.forEach((row) => { const date = parseDateTimeValue(row.dateEmail); const hour = date ? `${String(date.getHours()).padStart(2, "0")}:00` : "Sin hora"; hours.set(hour, (hours.get(hour) ?? 0) + 1); });
+  return { received: calls.length, attended: attended.length, withinSla: withinSla.length, nda: percentage(attended.length, calls.length), nds: percentage(withinSla.length, calls.length), tmoMinutes: validTmo.length ? validTmo.reduce((sum, value) => sum + value, 0) / validTmo.length : null, byMonth, byUser: points("usuarioAsignado"), byTipificacion: points("tipificacion"), byMotivo: points("motivo").filter((point) => point.name !== "Sin motivo"), byHour: pointsFromMap(hours) , period: byMonth.length ? `${byMonth[0].name} a ${byMonth[byMonth.length - 1].name}` : "Sin periodo" };
+}
+
+function isInboundCall(row: MetricRow) {
+  return row.direction === "Sin direction" || normalizeKey(row.direction) === "inbound";
+}
+
+function isAttendedCall(row: MetricRow) {
+  return row.durationSeconds > 0;
+}
+
+function matchesAttendedDefinition(row: MetricRow, statusNames: string[]) {
+  return statusNames.length ? statusNames.includes(row.statusName) : isAttendedCall(row);
+}
+
+function countAttendedCalls(rows: MetricRow[], statusNames: string[] = []) {
+  return rows.filter((row) => matchesAttendedDefinition(row, statusNames)).length;
+}
+
+function buildMonthlyCallPoints(rows: MetricRow[], statusNames: string[], focusedStatusName?: string | null): MonthlyCallPoint[] {
+  const months = new Map<string, MonthlyCallPoint>();
+  rows.forEach((row) => {
+    if (!months.has(row.month)) months.set(row.month, { name: row.month, received: 0, attended: 0, attendedOver20: 0 });
+  });
+
+  rows.forEach((row) => {
+    if (focusedStatusName && row.statusName !== focusedStatusName) return;
+    const point = months.get(row.month);
+    if (!point) return;
+    point.received += 1;
+
+    if (matchesAttendedDefinition(row, statusNames)) {
+      point.attended += 1;
+      if (row.durationSeconds > 20) {
+        point.attendedOver20 += 1;
+      }
+    }
+
+  });
+
+  return Array.from(months.values()).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function buildServiceSummary(rows: MetricRow[], statusNames: string[] = []): ServiceSummary {
+  const months = new Map<string, { received: number; attended: number; attendedUnder20: number; durationSeconds: number; waitAvailable: boolean }>();
+  let attended = 0;
+  let attendedUnder20 = 0;
+  let durationSeconds = 0;
+
+  rows.forEach((row) => {
+    const month = months.get(row.month) ?? { received: 0, attended: 0, attendedUnder20: 0, durationSeconds: 0, waitAvailable: false };
+    month.received += 1;
+    month.waitAvailable ||= row.waitSeconds !== null;
+
+    if (matchesAttendedDefinition(row, statusNames)) {
+      month.attended += 1;
+      month.durationSeconds += row.durationSeconds;
+      attended += 1;
+      durationSeconds += row.durationSeconds;
+
+      if (row.waitSeconds !== null && row.waitSeconds <= 20) {
+        month.attendedUnder20 += 1;
+        attendedUnder20 += 1;
+      }
+    }
+
+    months.set(row.month, month);
+  });
+
+  const byMonth = Array.from(months.entries())
+    .map(([name, month]) => {
+      const abandoned = month.received - month.attended;
+      return {
+        name,
+        received: month.received,
+        attended: month.attended,
+        attendedUnder20: month.attendedUnder20,
+        abandoned,
+        attentionRate: percentage(month.attended, month.received),
+        serviceRate: month.waitAvailable ? percentage(month.attendedUnder20, month.received) : null,
+        abandonmentRate: percentage(abandoned, month.received),
+        averageDurationSeconds: month.attended ? month.durationSeconds / month.attended : 0,
+      };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const received = rows.length;
+  const abandoned = received - attended;
+
+  return {
+    attentionRate: percentage(attended, received),
+    serviceRate: rows.some((row) => row.waitSeconds !== null) ? percentage(attendedUnder20, received) : null,
+    abandonmentRate: percentage(abandoned, received),
+    averageDurationSeconds: attended ? durationSeconds / attended : 0,
+    byMonth,
+  };
+}
+
 function buildDashboardSummary(rows: MetricRow[]): DashboardSummary {
   const counts = {
     date: new Map<string, number>(),
@@ -1267,6 +1403,7 @@ function buildDashboardSummary(rows: MetricRow[]): DashboardSummary {
     statusName: new Map<string, number>(),
     campaignId: new Map<string, number>(),
     user: new Map<string, number>(),
+    listName: new Map<string, number>(),
   } satisfies Record<FilterField, Map<string, number>>;
   const unique = {
     phone: new Set<string>(),
@@ -1290,12 +1427,14 @@ function buildDashboardSummary(rows: MetricRow[]): DashboardSummary {
     byMonth: pointsFromMap(counts.month, "name"),
     byHour: hourPointsFromMap(counts.hour),
     byStatus: pointsFromMap(counts.statusName),
+    byListName: pointsFromMap(counts.listName),
     byCampaign: pointsFromMap(counts.campaignId),
     byUser: pointsFromMap(counts.user),
     uniquePhones: unique.phone.size,
     uniqueUsers: unique.user.size,
     uniqueCampaigns: unique.campaignId.size,
     uniqueStatuses: unique.statusName.size,
+    attendedCalls: countAttendedCalls(rows),
   };
 }
 
@@ -1354,6 +1493,44 @@ function stopInsideClick(event: ReactMouseEvent<HTMLElement>) {
   event.stopPropagation();
 }
 
+function rowsForDashboardFocus(rows: MetricRow[], focus: Partial<Record<FilterField, string>>, excludedField?: FilterField) {
+  return rows.filter((row) => Object.entries(focus).every(([field, value]) => field === excludedField || !value || row[field as FilterField] === value));
+}
+
+function buildDurationDistribution(rows: MetricRow[]): ChartPoint[] {
+  const buckets = [
+    { name: "0 s", test: (seconds: number) => seconds === 0 },
+    { name: "1–20 s", test: (seconds: number) => seconds > 0 && seconds <= 20 },
+    { name: "21–60 s", test: (seconds: number) => seconds > 20 && seconds <= 60 },
+    { name: "61–180 s", test: (seconds: number) => seconds > 60 && seconds <= 180 },
+    { name: "181–300 s", test: (seconds: number) => seconds > 180 && seconds <= 300 },
+    { name: ">300 s", test: (seconds: number) => seconds > 300 },
+  ];
+  return buckets.map((bucket) => ({ name: bucket.name, total: rows.filter((row) => bucket.test(row.durationSeconds)).length }));
+}
+
+function buildUserPerformance(rows: MetricRow[]): UserPerformancePoint[] {
+  const groups = new Map<string, { received: number; attended: number }>();
+  rows.forEach((row) => {
+    const group = groups.get(row.user) ?? { received: 0, attended: 0 };
+    group.received += 1;
+    if (isAttendedCall(row)) group.attended += 1;
+    groups.set(row.user, group);
+  });
+  return Array.from(groups.entries()).map(([name, group]) => ({ ...group, name, attentionRate: percentage(group.attended, group.received) })).sort((a, b) => b.received - a.received);
+}
+
+const chartInfoByTitle: Record<string, string> = {
+  "Llamadas por mes": "Campos: call_date (para obtener el mes), status_name (filtro opcional) y length_in_sec (atendida si > 0; atendida >20 s si > 20). Fórmula: contar registros por mes; campaign_id LINDESAC se excluye antes del conteo.",
+  "Llamadas recibidas por hora": "Campos: call_date y hour (hora normalizada). Fórmula: contar registros agrupados por hora; no usa lead_id.",
+  "Estados de llamada": "Campo: status_name. Fórmula: contar registros por estado. Al hacer clic en un estado, sólo se enfoca visualmente este dashboard; las demás categorías permanecen visibles y atenuadas.",
+  "Campañas": "Campo: campaign_id. Fórmula: contar registros agrupados por campaña; se excluye LINDESAC.",
+  "Mapa de calor I1": "Campos: call_date y hora. Cuenta llamadas por día de semana y hora, mostrando sólo 07:00–23:00.",
+  "Calidad del servicio": "Campos: lead_id, call_date y tiempo de espera válido. NA = atendidas / recibidas. NS = atendidas con espera ≤20 segundos; si no existe espera válida, muestra N/D.",
+  "TMO por mes": "Campo: length_in_sec. TMO = promedio de duración de llamadas atendidas, agrupado por mes.",
+  "Abandono por mes": "Campos: lead_id y call_date. Abandonadas = recibidas únicas − atendidas únicas.",
+};
+
 function ChartPanel({
   title,
   meta,
@@ -1361,6 +1538,7 @@ function ChartPanel({
   onExpand,
   onExport,
   actions,
+  info,
 }: {
   title: string;
   meta: string;
@@ -1368,7 +1546,10 @@ function ChartPanel({
   onExpand?: () => void;
   onExport?: () => void;
   actions?: ReactNode;
+  info?: string;
 }) {
+  const panelInfo = info ?? chartInfoByTitle[title] ?? `Dashboard ${title}. Los datos se calculan dinámicamente desde el archivo cargado.`;
+
   return (
     <article className={styles.panel} onClick={stopInsideClick}>
       <div className={styles.panelHeader}>
@@ -1376,9 +1557,10 @@ function ChartPanel({
           <h2>{title}</h2>
           <span>{meta}</span>
         </div>
-        {actions || onExport || onExpand ? (
+        {actions || onExport || onExpand || info ? (
           <div className={styles.headerActions}>
             {actions}
+            <details className={styles.chartInfo}><summary aria-label={`Ver fórmula de ${title}`} title="Ver fórmula y campos"><Info size={17} aria-hidden="true" /></summary><p>{panelInfo}</p></details>
             {onExport ? (
               <button className={styles.iconButton} type="button" onClick={onExport} aria-label={`Exportar ${title} como imagen`} title={`Exportar ${title} como imagen`}>
                 <Download size={17} aria-hidden="true" />
@@ -1406,13 +1588,13 @@ export default function Home() {
   const statusChartRef = useRef<HTMLDivElement>(null);
   const campaignChartRef = useRef<HTMLDivElement>(null);
   const [rows, setRows] = useState<MetricRow[]>([]);
-  const [columns, setColumns] = useState<string[]>([]);
   const [fileName, setFileName] = useState("Sin archivo cargado");
   const [error, setError] = useState("");
   const [isDragging, setIsDragging] = useState(false);
-  const [activeFilter, setActiveFilter] = useState<ActiveFilter>(null);
+  const [dashboardFocus, setDashboardFocus] = useState<Partial<Record<FilterField, string>>>({});
+  const [selectedStatusNames, setSelectedStatusNames] = useState<string[]>([]);
+  const [statusFocus, setStatusFocus] = useState<string | null>(null);
   const [expandedChart, setExpandedChart] = useState<ChartKind | null>(null);
-  const [dateMode, setDateMode] = useState<DateMode>("week");
   const [callStartDate, setCallStartDate] = useState("");
   const [callEndDate, setCallEndDate] = useState("");
   const [activeView, setActiveView] = useState<DashboardView>("calls");
@@ -1434,38 +1616,52 @@ export default function Home() {
   const [incidentColumns, setIncidentColumns] = useState<string[]>([]);
   const [incidentFileName, setIncidentFileName] = useState("Sin archivo cargado");
   const [incidentError, setIncidentError] = useState("");
-  const [isFiltering, startFilterTransition] = useTransition();
 
   const dateFilteredRows = useMemo(
     () => rows.filter((row) => (!callStartDate && !callEndDate) || (row.date !== "Sin fecha" && (!callStartDate || row.date >= callStartDate) && (!callEndDate || row.date <= callEndDate))),
     [callEndDate, callStartDate, rows],
   );
-  const filterIndex = useMemo(() => buildFilterIndex(dateFilteredRows), [dateFilteredRows]);
   const fullSummary = useMemo(() => buildDashboardSummary(rows), [rows]);
-  const detailColumns = useMemo(() => visibleDetailColumns(columns), [columns]);
-  const visibleRows = useMemo(() => rowsForFilter(dateFilteredRows, filterIndex, activeFilter), [activeFilter, dateFilteredRows, filterIndex]);
-  const currentSummary = useMemo(
-    () => buildDashboardSummary(visibleRows),
-    [visibleRows],
+  const visibleRows = useMemo(
+    () => dateFilteredRows.filter((row) => Object.entries(dashboardFocus).every(([field, value]) => !value || row[field as FilterField] === value)),
+    [dashboardFocus, dateFilteredRows],
   );
-  const byDate = dateMode === "week" ? currentSummary.byWeek : dateMode === "month" ? currentSummary.byMonth : currentSummary.byDate;
-  const byHour = currentSummary.byHour;
+  const currentSummary = useMemo(
+    () => ({
+      ...buildDashboardSummary(visibleRows),
+      attendedCalls: countAttendedCalls(visibleRows, selectedStatusNames),
+    }),
+    [selectedStatusNames, visibleRows],
+  );
+  const monthChartRows = useMemo(() => rowsForDashboardFocus(dateFilteredRows, { ...dashboardFocus, statusName: undefined }, "month"), [dashboardFocus, dateFilteredRows]);
+  const hourChartRows = useMemo(() => rowsForDashboardFocus(dateFilteredRows, dashboardFocus, "hour"), [dashboardFocus, dateFilteredRows]);
+  const statusChartRows = useMemo(() => rowsForDashboardFocus(dateFilteredRows, dashboardFocus, "statusName"), [dashboardFocus, dateFilteredRows]);
+  const campaignChartRows = useMemo(() => rowsForDashboardFocus(dateFilteredRows, dashboardFocus, "campaignId"), [dashboardFocus, dateFilteredRows]);
+  const userChartRows = useMemo(() => rowsForDashboardFocus(dateFilteredRows, dashboardFocus, "user"), [dashboardFocus, dateFilteredRows]);
+  const campaignChartSummary = useMemo(() => buildDashboardSummary(campaignChartRows), [campaignChartRows]);
+  const statusChartSummary = useMemo(() => buildDashboardSummary(statusChartRows), [statusChartRows]);
+  const durationDistribution = useMemo(() => buildDurationDistribution(visibleRows), [visibleRows]);
+  const userPerformance = useMemo(() => buildUserPerformance(userChartRows), [userChartRows]);
+  const monthlyCallData = useMemo(
+    () => buildMonthlyCallPoints(monthChartRows, statusFocus ? [] : selectedStatusNames, statusFocus),
+    [monthChartRows, selectedStatusNames, statusFocus],
+  );
+  const serviceSummary = useMemo(() => buildServiceSummary(visibleRows, selectedStatusNames), [selectedStatusNames, visibleRows]);
+  const byHour = useMemo(() => buildDashboardSummary(hourChartRows).byHour, [hourChartRows]);
   const allStatus = fullSummary.byStatus;
-  const byStatus = currentSummary.byStatus;
-  const byCampaign = currentSummary.byCampaign;
-  const byUser = currentSummary.byUser;
+  const byStatus = statusChartSummary.byStatus;
+  const statusChartField: FilterField = "statusName";
+  const statusChartData = byStatus;
+  const allStatusChartData = allStatus;
+  const byCampaign = campaignChartSummary.byCampaign;
   const callHeatmap = useMemo(() => buildCallHeatmap(visibleRows), [visibleRows]);
-  const detailStatuses = byStatus.slice(0, 4);
-  const detailCampaigns = byCampaign.slice(0, 4);
-  const detailUsers = byUser.slice(0, 4);
-  const detailRows = useMemo(() => visibleRows.slice(0, detailRowLimit), [visibleRows]);
-  const hiddenDetailRows = Math.max(0, visibleRows.length - detailRows.length);
   const slowResolutionRows = useMemo(
     () => matrixRows.filter((row) => row.minutesToRegister !== null && row.minutesToRegister > 20),
     [matrixRows],
   );
   const visibleMatrixRows = showSlowResolutionOnly ? slowResolutionRows : matrixRows;
   const matrixSummary = useMemo(() => buildMatrixSummary(visibleMatrixRows), [visibleMatrixRows]);
+  const emailSummary = useMemo(() => buildEmailSummary(visibleMatrixRows), [visibleMatrixRows]);
   const emailHeatmap = useMemo(() => buildEmailHeatmap(visibleMatrixRows), [visibleMatrixRows]);
   const matrixDetailRows = useMemo(() => visibleMatrixRows.slice(0, detailRowLimit), [visibleMatrixRows]);
   const hiddenMatrixRows = Math.max(0, visibleMatrixRows.length - matrixDetailRows.length);
@@ -1486,9 +1682,11 @@ export default function Home() {
   const performanceChartHeight = Math.max(320, Math.min(760, performanceSummary.byAgent.length * 44));
   const campaignChartHeight = Math.max(280, Math.min(760, byCampaign.length * 38));
   const matrixUserChartHeight = Math.max(280, Math.min(620, matrixSummary.byUser.length * 38));
-  const userChartMax = byUser[0]?.total ?? 1;
-  const statusTotal = currentSummary.total;
-  const statusColorFor = (name: string) => chartColor(Math.max(0, allStatus.findIndex((item) => item.name === name)));
+  const statusTotal = statusChartSummary.total;
+  const statusColorFor = (name: string) => chartColor(Math.max(0, allStatusChartData.findIndex((item) => item.name === name)));
+  const statusFilterLabel = selectedStatusNames.length
+    ? `${selectedStatusNames.length} de ${allStatus.length} seleccionados`
+    : "Todos los estados";
 
   const chartRefs: Record<ChartKind, RefObject<HTMLDivElement | null>> = {
     date: dateChartRef,
@@ -1496,6 +1694,16 @@ export default function Home() {
     status: statusChartRef,
     campaign: campaignChartRef,
   };
+
+  useEffect(() => {
+    const saved = readPersistedCalls();
+    if (saved) {
+      window.setTimeout(() => {
+        setRows(saved.rows);
+        setFileName(saved.fileName);
+      }, 0);
+    }
+  }, []);
 
   useEffect(() => {
     function handleExtensionMessage(event: MessageEvent) {
@@ -1514,21 +1722,24 @@ export default function Home() {
     return () => window.removeEventListener("message", handleExtensionMessage);
   }, []);
 
-  function clearFilters() {
-    startFilterTransition(() => {
-      setActiveFilter(null);
-    });
+  function setFilter(field: FilterField, _label: string, value: string) {
+    if (field === "statusName") {
+      toggleStatusName(value);
+      return;
+    }
+
+    setDashboardFocus((current) => ({
+      ...current,
+      [field]: current[field] === value ? undefined : value,
+    }));
   }
 
-  function setFilter(field: FilterField, label: string, value: string) {
-    startFilterTransition(() => {
-      setActiveFilter((current) => {
-        if (current?.field === field && current.value === value) {
-          return null;
-        }
-
-        return { field, label, value };
-      });
+  function toggleStatusName(statusName: string) {
+    setSelectedStatusNames((current) => {
+      const baseline = current.length ? current : allStatus.map((item) => item.name);
+      return baseline.includes(statusName)
+        ? baseline.filter((name) => name !== statusName)
+        : [...baseline, statusName];
     });
   }
 
@@ -1551,7 +1762,8 @@ export default function Home() {
   }
 
   function pointIsSelected(field: FilterField, point: ChartPoint) {
-    return activeFilter?.field === field && activeFilter.value === point.name;
+    if (field === "statusName") return statusFocus === point.name;
+    return dashboardFocus[field] === point.name;
   }
 
   function pointLabel(field: FilterField, point: ChartPoint) {
@@ -1559,7 +1771,22 @@ export default function Home() {
       return "En foco";
     }
 
+    if (field === "statusName") {
+      return formatPercent(percentage(point.total, statusTotal));
+    }
+
     return String(point.total);
+  }
+
+  function focusStatus(name: string) {
+    const next = statusFocus === name ? null : name;
+    setStatusFocus(next);
+    setDashboardFocus((filters) => ({ ...filters, statusName: next ?? undefined }));
+  }
+
+  function isDimmed(field: FilterField, name: string) {
+    const focus = dashboardFocus[field];
+    return Boolean(focus && focus !== name);
   }
 
   async function loadFile(file: File) {
@@ -1576,15 +1803,20 @@ export default function Home() {
         rawRows = parseDelimitedText(await file.text());
       }
 
-      const mappedRows = mapRows(rawRows);
+      const mappedRows = mapRows(rawRows).filter(
+        (row) => isInboundCall(row) && !row.campaignId.toUpperCase().includes("LINDESAC"),
+      );
       if (!mappedRows.length) {
-        throw new Error("No encontre filas validas en el archivo.");
+        throw new Error("No encontre llamadas inbound válidas después de excluir las campañas LINDESAC.");
       }
 
       setRows(mappedRows);
-      setColumns(Object.keys(rawRows[0] ?? {}));
-      setActiveFilter(null);
-      setDateMode("week");
+      setSelectedStatusNames([]);
+      try {
+        window.localStorage.setItem(persistedCallsKey, JSON.stringify({ fileName: file.name, columns: Object.keys(rawRows[0] ?? {}), rows: mappedRows }));
+      } catch {
+        // Archivos muy grandes pueden superar la cuota; se mantienen disponibles durante la sesión.
+      }
     } catch (currentError) {
       setError(currentError instanceof Error ? currentError.message : "No pude leer el archivo.");
     }
@@ -1676,8 +1908,8 @@ export default function Home() {
               ]}
             />
             <Legend />
-            <Bar dataKey="asignacion" name="Asignacion" fill="#f9a8d4" radius={[0, 4, 4, 0]} />
-            <Bar dataKey="resolucion" name="Resolucion" fill="#f0abfc" radius={[0, 4, 4, 0]} />
+            <Bar dataKey="asignacion" name="Asignacion" fill="#2563a8" radius={[0, 4, 4, 0]} />
+            <Bar dataKey="resolucion" name="Resolucion" fill="#0f766e" radius={[0, 4, 4, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -1699,7 +1931,7 @@ export default function Home() {
             <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} />
             <YAxis type="category" dataKey="name" tick={{ fontSize: 12 }} width={128} />
             <Tooltip />
-            <Bar dataKey="total" name="Registros" fill="#f472b6" radius={[0, 4, 4, 0]} />
+            <Bar dataKey="total" name="Registros" fill="#2563a8" radius={[0, 4, 4, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -1721,7 +1953,7 @@ export default function Home() {
             <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} />
             <YAxis type="category" dataKey="name" tick={{ fontSize: 12 }} width={150} />
             <Tooltip />
-            <Bar dataKey="total" name="Observaciones" fill="#f9a8d4" radius={[0, 4, 4, 0]} />
+            <Bar dataKey="total" name="Observaciones" fill="#2563a8" radius={[0, 4, 4, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -1754,9 +1986,9 @@ export default function Home() {
               labelFormatter={(label) => `Agente: ${label}`}
             />
             <Legend />
-            <Bar dataKey="productivity" name="Productividad" fill="#f9a8d4" radius={[0, 4, 4, 0]} />
-            <Bar dataKey="quality" name="Calidad" fill="#f0abfc" radius={[0, 4, 4, 0]} />
-            <Bar dataKey="effectiveness" name="Efectividad" fill="#fda4af" radius={[0, 4, 4, 0]} />
+            <Bar dataKey="productivity" name="Productividad" fill="#2563a8" radius={[0, 4, 4, 0]} />
+            <Bar dataKey="quality" name="Calidad" fill="#0f766e" radius={[0, 4, 4, 0]} />
+            <Bar dataKey="effectiveness" name="Efectividad" fill="#475569" radius={[0, 4, 4, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -1772,8 +2004,8 @@ export default function Home() {
       <article className={styles.panel}>
         <div className={styles.panelHeader}>
           <div>
-            <h2>Timeline por agente</h2>
-            <span>Ocupacion por correo desde asignacion hasta resolucion</span>
+            <h2>Timeline de gestión por agente</h2>
+            <span>Asignación y resolución por correo · selecciona un día y escala temporal</span>
           </div>
           {timelineDays.length ? (
             <select
@@ -2032,32 +2264,16 @@ export default function Home() {
   }
 
   function renderDateChart(height = 280) {
-    const dateFilterField = dateMode === "week" ? "week" : dateMode === "month" ? "month" : "date";
-    const dateFilterLabel = dateMode === "week" ? "Semana" : dateMode === "month" ? "Mes" : "Fecha";
-
-    return byDate.length ? (
-      <div className={styles.chartStack}>
-        <div className={styles.segmentedControl}>
-          {(["week", "month", "total"] as DateMode[]).map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              className={dateMode === mode ? styles.segmentedActive : ""}
-              onClick={() => setDateMode(mode)}
-            >
-              {mode === "week" ? "Semana" : mode === "month" ? "Mes" : "Total"}
-            </button>
-          ))}
-        </div>
-        <div className={styles.chartShell}>
+    return monthlyCallData.length ? (
+      <div className={styles.chartShell}>
         <ResponsiveContainer width="100%" height={height}>
-          <LineChart
-            data={byDate}
+          <BarChart
+            data={monthlyCallData}
             margin={{ left: 0, right: 16, top: 8, bottom: 0 }}
             onClick={(state) => {
               const value = chartClickValue(state as ChartClickState);
               if (value) {
-                setFilter(dateFilterField, dateFilterLabel, value);
+                setFilter("month", "Mes", value);
               }
             }}
           >
@@ -2065,21 +2281,38 @@ export default function Home() {
             <XAxis dataKey="name" tick={{ fontSize: 12 }} />
             <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
             <Tooltip />
-            <Line
-              type="monotone"
-              dataKey="total"
-              name="Registros"
-              stroke="#f472b6"
-              strokeWidth={3}
-              dot={{ r: 4 }}
-            />
-          </LineChart>
+            <Legend />
+            <Bar isAnimationActive={false} dataKey="received" name="Llamadas recibidas" fill="#1d4ed8" radius={[4, 4, 0, 0]}>
+              {monthlyCallData.map((entry) => <Cell key={`received-${entry.name}`} fill="#1d4ed8" opacity={isDimmed("month", entry.name) ? 0.2 : 1} />)}
+            </Bar>
+            <Bar isAnimationActive={false} dataKey="attended" name="Llamadas atendidas" fill="#0f766e" radius={[4, 4, 0, 0]}>
+              {monthlyCallData.map((entry) => <Cell key={`attended-${entry.name}`} fill="#0f766e" opacity={isDimmed("month", entry.name) ? 0.2 : 1} />)}
+            </Bar>
+            <Bar isAnimationActive={false} dataKey="attendedOver20" name="Atendidas > 20 segundos" fill="#475569" radius={[4, 4, 0, 0]}>
+              {monthlyCallData.map((entry) => <Cell key={`over20-${entry.name}`} fill="#475569" opacity={isDimmed("month", entry.name) ? 0.2 : 1} />)}
+            </Bar>
+          </BarChart>
         </ResponsiveContainer>
-        </div>
       </div>
     ) : (
-      <EmptyChart>Sin fechas para graficar</EmptyChart>
+      <EmptyChart>Sin meses para graficar</EmptyChart>
     );
+  }
+
+  function renderEmailMonthlyChart() {
+    return <ResponsiveContainer width="100%" height={300}><BarChart data={emailSummary.byMonth}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis allowDecimals={false} /><Tooltip /><Bar isAnimationActive={false} dataKey="received" name="Correos recibidos" fill="#12355b" /></BarChart></ResponsiveContainer>;
+  }
+
+  function renderEmailQualityChart() {
+    return <ResponsiveContainer width="100%" height={300}><LineChart data={emailSummary.byMonth}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis domain={[0, 100]} tickFormatter={(value) => `${value}%`} /><Tooltip formatter={(value) => [`${Number(value).toFixed(1)}%`, "Porcentaje"]} /><Legend /><Line isAnimationActive={false} type="monotone" dataKey="nda" name="NDA" stroke="#12355b" strokeWidth={3} /><Line isAnimationActive={false} type="monotone" dataKey="nds" name="NDS" stroke="#f97316" strokeWidth={3} /></LineChart></ResponsiveContainer>;
+  }
+
+  function renderEmailTmoChart() {
+    return <ResponsiveContainer width="100%" height={300}><BarChart data={emailSummary.byMonth}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis tickFormatter={(value) => `${Number(value).toFixed(0)} min`} /><Tooltip formatter={(value) => [formatEmailTmo(Number(value)), "TMO"]} /><Bar isAnimationActive={false} dataKey="tmoMinutes" name="TMO" fill="#2563a8" /></BarChart></ResponsiveContainer>;
+  }
+
+  function renderEmailHourChart() {
+    return <ResponsiveContainer width="100%" height={300}><BarChart data={emailSummary.byHour}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis allowDecimals={false} /><Tooltip /><Bar isAnimationActive={false} dataKey="total" name="Correos" fill="#0f766e" /></BarChart></ResponsiveContainer>;
   }
 
   function renderHourChart(height = 280) {
@@ -2101,9 +2334,10 @@ export default function Home() {
             <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
             <Tooltip />
             <Bar
+              isAnimationActive={false}
               dataKey="total"
-              name="Registros"
-              fill="#f9a8d4"
+              name="Llamadas recibidas"
+              fill="#2563a8"
               radius={[4, 4, 0, 0]}
               onClick={(entry) => {
                 const value = chartPointName(entry);
@@ -2111,57 +2345,62 @@ export default function Home() {
                   setFilter("hour", "Hora", value);
                 }
               }}
-            />
+            >
+              {byHour.map((entry) => <Cell key={entry.name} fill="#2563a8" opacity={isDimmed("hour", entry.name) ? 0.2 : 1} />)}
+            </Bar>
           </BarChart>
         </ResponsiveContainer>
       </div>
     );
   }
 
-  function renderStatusChart(height = 280) {
-    return (
-      <div className={styles.statusChartLayout}>
-        <div className={styles.pieFrame}>
-          <ResponsiveContainer width="100%" height={height}>
-            <PieChart>
-              <Pie
-                data={byStatus}
-                dataKey="total"
-                nameKey="name"
-                innerRadius={height > 300 ? 82 : 56}
-                outerRadius={height > 300 ? 150 : 98}
-                paddingAngle={2}
-                onClick={(entry) => setFilter("statusName", "Status name", String((entry as unknown as ChartPoint).name))}
-              >
-                {byStatus.map((entry) => (
-                  <Cell key={entry.name} fill={statusColorFor(entry.name)} />
-                ))}
-              </Pie>
-              <Tooltip />
-            </PieChart>
-          </ResponsiveContainer>
-          <div className={styles.pieCenter}>
-            <span>Total</span>
-            <strong>{statusTotal.toLocaleString("es-PE")}</strong>
-          </div>
-        </div>
-        <div className={styles.statusLegend}>
-          {byStatus.map((item) => (
-            <button
-              key={item.name}
-              type="button"
-              className={`${styles.legendItem} ${pointIsSelected("statusName", item) ? styles.focusedItem : ""}`}
-              onClick={() => setFilter("statusName", "Status name", item.name)}
-              title={`${item.name}: ${item.total} registros`}
-            >
-              <span style={{ backgroundColor: statusColorFor(item.name) }} />
-              <strong>{item.name}</strong>
-              <em>{pointLabel("statusName", item)}</em>
-            </button>
-          ))}
-        </div>
+  function renderServiceQualityChart() {
+    return serviceSummary.byMonth.length ? (
+      <div className={styles.chartShell}>
+        <ResponsiveContainer width="100%" height={300}>
+          <LineChart data={serviceSummary.byMonth} margin={{ left: 0, right: 16, top: 8, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f8dbe8" />
+            <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+            <YAxis domain={[0, 100]} tickFormatter={(value) => `${value}%`} tick={{ fontSize: 12 }} />
+            <Tooltip formatter={(value) => [formatPercent(Number(value)), "Porcentaje"]} />
+            <Legend />
+            <Line isAnimationActive={false} type="monotone" dataKey="attentionRate" name="Nivel de atención" stroke="#1d4ed8" strokeWidth={3} dot={{ r: 4 }} />
+          </LineChart>
+        </ResponsiveContainer>
       </div>
-    );
+    ) : <EmptyChart>Sin meses para calcular calidad</EmptyChart>;
+  }
+
+  function renderServiceDurationChart() {
+    return serviceSummary.byMonth.length ? (
+      <div className={styles.chartShell}>
+        <ResponsiveContainer width="100%" height={300}>
+          <BarChart data={serviceSummary.byMonth} margin={{ left: 0, right: 16, top: 8, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f8dbe8" />
+            <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+            <YAxis tickFormatter={(value) => formatCallDuration(Number(value))} tick={{ fontSize: 12 }} />
+            <Tooltip formatter={(value) => [formatCallDuration(Number(value)), "TMO"]} />
+            <Bar dataKey="averageDurationSeconds" name="TMO" fill="#1d4ed8" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    ) : <EmptyChart>Sin llamadas atendidas para calcular TMO</EmptyChart>;
+  }
+
+  function renderAbandonmentChart() {
+    return serviceSummary.byMonth.length ? (
+      <div className={styles.chartShell}>
+        <ResponsiveContainer width="100%" height={300}>
+          <BarChart data={serviceSummary.byMonth} margin={{ left: 0, right: 16, top: 8, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f8dbe8" />
+            <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+            <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+            <Tooltip />
+            <Bar dataKey="abandoned" name="Llamadas abandonadas" fill="#f97316" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    ) : <EmptyChart>Sin meses para calcular abandono</EmptyChart>;
   }
 
   function renderCampaignChart(height = campaignChartHeight) {
@@ -2175,7 +2414,7 @@ export default function Home() {
             onClick={(state) => {
               const value = chartClickValue(state as ChartClickState);
               if (value) {
-                setFilter("campaignId", "Campaign ID", value);
+                setFilter("campaignId", "Campañas", value);
               }
             }}
           >
@@ -2184,19 +2423,74 @@ export default function Home() {
             <YAxis type="category" dataKey="name" tick={{ fontSize: 12 }} width={128} />
             <Tooltip />
             <Bar
+              isAnimationActive={false}
               dataKey="total"
-              name="Registros"
-              fill="#f0abfc"
+              name="Llamadas recibidas"
+              fill="#0f766e"
               radius={[0, 4, 4, 0]}
               onClick={(entry) => {
                 const value = chartPointName(entry);
                 if (value) {
-                  setFilter("campaignId", "Campaign ID", value);
+                  setFilter("campaignId", "Campañas", value);
                 }
               }}
-            />
+            >
+              {byCampaign.map((entry) => <Cell key={entry.name} fill="#0f766e" opacity={isDimmed("campaignId", entry.name) ? 0.2 : 1} />)}
+            </Bar>
           </BarChart>
         </ResponsiveContainer>
+      </div>
+    );
+  }
+
+  function renderDurationDistribution() {
+    return <ResponsiveContainer width="100%" height={280}><BarChart data={durationDistribution}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis allowDecimals={false} /><Tooltip /><Bar isAnimationActive={false} dataKey="total" name="Llamadas" fill="#2563a8" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer>;
+  }
+
+  function renderUserPerformance() {
+    return <ResponsiveContainer width="100%" height={Math.max(280, Math.min(620, userPerformance.length * 34))}><BarChart data={userPerformance} layout="vertical" margin={{ left: 24, right: 20 }} onClick={(state) => { const value = chartClickValue(state as ChartClickState); if (value) setFilter("user", "Usuario", value); }}><CartesianGrid strokeDasharray="3 3" /><XAxis type="number" allowDecimals={false} /><YAxis type="category" dataKey="name" width={110} /><Tooltip /><Legend /><Bar isAnimationActive={false} dataKey="received" name="Recibidas" fill="#1d4ed8" onClick={(entry) => { const value = chartPointName(entry); if (value) setFilter("user", "Usuario", value); }}>{userPerformance.map((entry) => <Cell key={`received-${entry.name}`} fill="#1d4ed8" opacity={isDimmed("user", entry.name) ? 0.2 : 1} />)}</Bar><Bar isAnimationActive={false} dataKey="attended" name="Atendidas" fill="#0f766e" onClick={(entry) => { const value = chartPointName(entry); if (value) setFilter("user", "Usuario", value); }}>{userPerformance.map((entry) => <Cell key={`attended-${entry.name}`} fill="#0f766e" opacity={isDimmed("user", entry.name) ? 0.2 : 1} />)}</Bar></BarChart></ResponsiveContainer>;
+  }
+
+  function renderRawCallRows() {
+    const rawColumns = Object.keys(visibleRows[0]?.raw ?? {});
+    const previewRows = visibleRows.slice(0, 100);
+    return (
+      <div className={styles.rawDataBlock}>
+        <div className={styles.rawDataHeader}><strong>Datos crudos filtrados</strong><span>{visibleRows.length.toLocaleString("es-PE")} filas{visibleRows.length > previewRows.length ? ` · mostrando ${previewRows.length}` : ""}</span></div>
+        <div className={styles.rawDataScroll}>
+          <table className={styles.rawDataTable}>
+            <thead><tr>{rawColumns.map((column) => <th key={column}>{column}</th>)}</tr></thead>
+            <tbody>{previewRows.map((row) => <tr key={row.id}>{rawColumns.map((column) => <td key={`${row.id}-${column}`}>{row.raw[column] ?? ""}</td>)}</tr>)}</tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
+  function renderStatusChart(height = 280) {
+    return (
+      <div className={styles.statusChartLayout}>
+        <div className={styles.pieFrame}>
+          <ResponsiveContainer width="100%" height={height}>
+            <PieChart>
+              <Pie isAnimationActive={false} data={statusChartData} dataKey="total" nameKey="name" innerRadius={height > 300 ? 82 : 56} outerRadius={height > 300 ? 150 : 98} paddingAngle={2} onClick={(entry) => focusStatus(String((entry as unknown as ChartPoint).name))}>
+                {statusChartData.map((entry) => <Cell key={entry.name} fill={statusColorFor(entry.name)} opacity={statusFocus && statusFocus !== entry.name ? 0.2 : 1} style={statusFocus && statusFocus !== entry.name ? { filter: "grayscale(1)" } : undefined} />)}
+              </Pie>
+              <Tooltip formatter={(value) => [formatPercent(percentage(Number(value), statusTotal)), "Porcentaje"]} />
+            </PieChart>
+          </ResponsiveContainer>
+          <div className={styles.pieCenter}>
+            <span>{statusFocus ? "Seleccionado" : "Total"}</span>
+            <strong>{(statusFocus ? statusChartData.find((item) => item.name === statusFocus)?.total ?? 0 : statusTotal).toLocaleString("es-PE")}</strong>
+          </div>
+        </div>
+        <div className={styles.statusLegend}>
+          {statusChartData.map((item) => (
+            <button key={item.name} type="button" className={`${styles.legendItem} ${pointIsSelected(statusChartField, item) ? styles.focusedItem : ""}`} onClick={() => focusStatus(item.name)} style={statusFocus && statusFocus !== item.name ? { opacity: 0.42, filter: "grayscale(1)" } : undefined}>
+              <span style={{ backgroundColor: statusColorFor(item.name) }} /><strong>{item.name}</strong><em>{pointLabel(statusChartField, item)}</em>
+            </button>
+          ))}
+        </div>
       </div>
     );
   }
@@ -2218,7 +2512,7 @@ export default function Home() {
   }
 
   return (
-    <main className={styles.page} onClick={clearFilters}>
+    <main className={styles.page}>
       <section className={styles.header} onClick={stopInsideClick}>
         <div>
           <h1>Control operativo</h1>
@@ -2269,8 +2563,9 @@ export default function Home() {
         <>
           <section className={styles.reportPanel} onClick={stopInsideClick}>
             <div>
+              <small className={styles.reportKicker}>Indicador 01 · Canal inbound</small>
               <h2>I1 - Llamadas inbound</h2>
-              <span>Carga el reporte real para ver fechas, horas, usuarios, telefonos, campaign_id y status_name.</span>
+              <span className={styles.reportDescription}>Volumen, atención, campañas y horarios · LINDESAC excluida · <a href="/MANUAL_I1.txt" download>Descargar manual I1</a></span>
             </div>
             <div
               className={`${styles.inlineUpload} ${isDragging ? styles.dropzoneActive : ""}`}
@@ -2397,8 +2692,8 @@ export default function Home() {
           <div className={styles.matrixHeader}>
             <div>
               <span className={styles.eyebrow}>Reporte matriz</span>
-              <h2>Tiempos SLA de atencion</h2>
-              <p>{matrixRangeLabel} · horario muerto 23:01 a 06:59</p>
+              <h2>Correos 2026 · desempeño operativo</h2>
+              <p>{emailSummary.period} · SLA configurado: {EMAIL_SLA_MINUTES} min · {matrixRangeLabel}</p>
             </div>
             <div className={styles.matrixActions}>
               <button
@@ -2419,16 +2714,37 @@ export default function Home() {
           </div>
 
           <div className={styles.statsGrid}>
-            <StatCard icon={<Mail size={18} />} label="Emails" value={matrixSummary.total.toLocaleString("es-PE")} />
-            <StatCard icon={<Timer size={18} />} label="SLA a asignacion" value={formatMinutes(matrixSummary.avgToAssign)} />
-            <StatCard icon={<Clock3 size={18} />} label="SLA a resolucion" value={formatMinutes(matrixSummary.avgToRegister)} />
-            <StatCard icon={<Timer size={18} />} label="SLA total" value={formatMinutes(matrixSummary.avgTotal)} />
-            <StatCard icon={<Hash size={18} />} label="Terminados" value={matrixSummary.completed.toLocaleString("es-PE")} />
+            <StatCard icon={<Mail size={18} />} label="Correos recibidos" value={emailSummary.received.toLocaleString("es-PE")} />
+            <StatCard icon={<UserRound size={18} />} label="NDA" value={formatPercent(emailSummary.nda)} />
+            <StatCard icon={<Clock3 size={18} />} label="NDS" value={formatPercent(emailSummary.nds)} />
+            <StatCard icon={<Timer size={18} />} label="TMO promedio" value={formatEmailTmo(emailSummary.tmoMinutes)} />
+            <StatCard icon={<Hash size={18} />} label="Correos atendidos" value={emailSummary.attended.toLocaleString("es-PE")} />
           </div>
 
           {renderAgentTimeline()}
 
           <div className={styles.matrixGrid}>
+            <ChartPanel title="Evolución mensual de correos recibidos" meta="COUNT DISTINCT id_email" info="Campos: date_email e id_email. Agrupa por año-mes y cuenta correos únicos.">
+              {renderEmailMonthlyChart()}
+            </ChartPanel>
+            <ChartPanel title="Evolución de indicadores de calidad" meta="NDA vs NDS" info={`NDA = correos atendidos / recibidos. NDS = correos asignados en ≤ ${EMAIL_SLA_MINUTES} minutos / recibidos.`}>
+              {renderEmailQualityChart()}
+            </ChartPanel>
+            <ChartPanel title="Evolución del TMO" meta="Tiempo medio de operación">
+              {renderEmailTmoChart()}
+            </ChartPanel>
+            <ChartPanel title="Correos por hora de recepción" meta="Hora extraída de date_email">
+              {renderEmailHourChart()}
+            </ChartPanel>
+            <ChartPanel title="Correos por tipificación" meta="tipificacion · id_email">
+              {renderMatrixBarChart(emailSummary.byTipificacion, "#2563a8")}
+            </ChartPanel>
+            <ChartPanel title="Correos por motivo" meta="motivo · id_email">
+              {renderMatrixBarChart(emailSummary.byMotivo, "#0f766e")}
+            </ChartPanel>
+            <ChartPanel title="Correos por usuario" meta="usuario asignado · id_email">
+              {renderMatrixBarChart(emailSummary.byUser, "#475569")}
+            </ChartPanel>
             <ChartPanel
               title="Mapa de calor I2"
               meta="Correos recibidos por día y hora"
@@ -2460,13 +2776,13 @@ export default function Home() {
               title="Tipificacion"
               meta={`${matrixSummary.byTipificacion.length} tipos`}
             >
-              {renderMatrixBarChart(matrixSummary.byTipificacion, "#f9a8d4")}
+              {renderMatrixBarChart(matrixSummary.byTipificacion, "#2563a8")}
             </ChartPanel>
             <ChartPanel
               title="Estado de registro"
               meta={`${matrixSummary.byEstado.length} estados`}
             >
-              {renderMatrixBarChart(matrixSummary.byEstado, "#f0abfc")}
+              {renderMatrixBarChart(matrixSummary.byEstado, "#0f766e")}
             </ChartPanel>
             <ChartPanel
               title="Usuario asignado"
@@ -2475,6 +2791,21 @@ export default function Home() {
               {renderMatrixUserChart()}
             </ChartPanel>
           </div>
+
+          <article className={styles.panel}>
+            <div className={styles.panelHeader}><div><h2>Tabla resumen del periodo</h2><span>Valores mensuales calculados con id_email único</span></div></div>
+            <div className={styles.tableWrap}>
+              <table>
+                <thead><tr><th>Indicador</th>{emailSummary.byMonth.map((month) => <th key={month.name}>{month.name}</th>)}<th>Promedio</th></tr></thead>
+                <tbody>
+                  <tr><td>Correos recibidos</td>{emailSummary.byMonth.map((month) => <td key={month.name}>{month.received.toLocaleString("es-PE")}</td>)}<td>{emailSummary.received.toLocaleString("es-PE")}</td></tr>
+                  <tr><td>NDA</td>{emailSummary.byMonth.map((month) => <td key={month.name}>{formatPercent(month.nda)}</td>)}<td>{formatPercent(emailSummary.nda)}</td></tr>
+                  <tr><td>NDS</td>{emailSummary.byMonth.map((month) => <td key={month.name}>{formatPercent(month.nds)}</td>)}<td>{formatPercent(emailSummary.nds)}</td></tr>
+                  <tr><td>TMO</td>{emailSummary.byMonth.map((month) => <td key={month.name}>{formatEmailTmo(month.tmoMinutes)}</td>)}<td>{formatEmailTmo(emailSummary.tmoMinutes)}</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
 
           <article className={styles.panel}>
             <div className={styles.panelHeader}>
@@ -2580,13 +2911,13 @@ export default function Home() {
                   {renderIncidentAgentChart()}
                 </ChartPanel>
                 <ChartPanel title="Por tipo de inconsistencia" meta={`${incidentSummary.byType.length} tipos`}>
-                  {renderMatrixBarChart(incidentSummary.byType, "#f9a8d4")}
+                  {renderMatrixBarChart(incidentSummary.byType, "#2563a8")}
                 </ChartPanel>
                 <ChartPanel title="Por sucursal" meta={`${incidentSummary.byBranch.length} sucursales`}>
-                  {renderMatrixBarChart(incidentSummary.byBranch, "#f472b6")}
+                  {renderMatrixBarChart(incidentSummary.byBranch, "#0f766e")}
                 </ChartPanel>
                 <ChartPanel title="Por mes" meta={`${incidentSummary.byMonth.length} meses`}>
-                  {renderMatrixBarChart(incidentSummary.byMonth, "#f0abfc")}
+                  {renderMatrixBarChart(incidentSummary.byMonth, "#475569")}
                 </ChartPanel>
               </div>
 
@@ -2665,7 +2996,7 @@ export default function Home() {
             >
               {renderMatrixBarChart(
                 performanceSummary.byAgent.map((row) => ({ name: row.agent, total: row.attended })),
-                "#f472b6",
+                "#0f766e",
                 Math.max(280, Math.min(620, performanceSummary.byAgent.length * 42)),
               )}
             </ChartPanel>
@@ -2712,31 +3043,56 @@ export default function Home() {
         </section>
       ) : null}
 
-      {activeView === "calls" && rows.length && activeFilter ? (
-        <section className={styles.filterBar} onClick={stopInsideClick}>
-          <span>
-            Vista filtrada por {activeFilter.label}: <strong>{activeFilter.value}</strong>
-            {isFiltering ? <em>Actualizando vista...</em> : null}
-          </span>
+      {activeView === "calls" && rows.length ? (
+        <section className={styles.statusFilter} onClick={stopInsideClick}>
+          <details>
+            <summary>
+              <span>Filtrar llamadas atendidas por Estado de llamada</span>
+              <strong>{statusFilterLabel}</strong>
+            </summary>
+            <div className={styles.statusFilterContent}>
+              <div className={styles.statusFilterActions}>
+                <button type="button" onClick={() => setSelectedStatusNames(allStatus.map((item) => item.name))}>
+                  Seleccionar todos
+                </button>
+                <button type="button" onClick={() => setSelectedStatusNames([])}>
+                  Mostrar todos
+                </button>
+              </div>
+              <div className={styles.statusFilterOptions}>
+                {allStatus.map((item) => (
+                  <label key={item.name}>
+                    <input
+                      type="checkbox"
+                      checked={!selectedStatusNames.length || selectedStatusNames.includes(item.name)}
+                      onChange={() => toggleStatusName(item.name)}
+                    />
+                    <span>{item.name}</span>
+                    <em>{item.total.toLocaleString("es-PE")}</em>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </details>
         </section>
       ) : null}
 
       {activeView === "calls" && rows.length ? (
         <>
       <section className={styles.statsGrid} onClick={stopInsideClick}>
-        <StatCard icon={<Hash size={18} />} label="Registros" value={currentSummary.total.toLocaleString("es-PE")} />
-        <StatCard icon={<Phone size={18} />} label="Telefonos" value={currentSummary.uniquePhones.toLocaleString("es-PE")} />
-        <StatCard icon={<UserRound size={18} />} label="Usuarios" value={currentSummary.uniqueUsers.toLocaleString("es-PE")} />
-        <StatCard icon={<CalendarDays size={18} />} label="Campañas" value={currentSummary.uniqueCampaigns.toLocaleString("es-PE")} />
-        <StatCard icon={<Clock3 size={18} />} label="Estados" value={currentSummary.uniqueStatuses.toLocaleString("es-PE")} />
+        <StatCard icon={<Hash size={18} />} label="Llamadas recibidas" value={currentSummary.total.toLocaleString("es-PE")} />
+        <StatCard icon={<Phone size={18} />} label="Llamadas atendidas" value={currentSummary.attendedCalls.toLocaleString("es-PE")} />
+        <StatCard icon={<UserRound size={18} />} label="Nivel de atención" value={formatPercent(percentage(currentSummary.attendedCalls, currentSummary.total))} />
+        <StatCard icon={<Phone size={18} />} label="Abandono" value={formatPercent(percentage(Math.max(0, currentSummary.total - currentSummary.attendedCalls), currentSummary.total))} />
+        <StatCard icon={<Timer size={18} />} label="TMO promedio" value={formatCallDuration(serviceSummary.averageDurationSeconds)} />
       </section>
 
       <section className={styles.dashboardGrid}>
         <ChartPanel
-          title="Registros por fecha"
-          meta={`${byDate.length} fechas`}
+          title="Llamadas por mes"
+          meta={`${monthlyCallData.length} meses`}
           onExpand={() => setExpandedChart("date")}
-          onExport={() => void exportChart("date", "Registros por fecha")}
+          onExport={() => void exportChart("date", "Llamadas por mes")}
         >
           <div ref={dateChartRef} className={styles.exportFrame}>
             {renderDateChart()}
@@ -2744,10 +3100,10 @@ export default function Home() {
         </ChartPanel>
 
         <ChartPanel
-          title="Registros por hora"
+          title="Llamadas recibidas por hora"
           meta={`${byHour.length} horas`}
           onExpand={() => setExpandedChart("hour")}
-          onExport={() => void exportChart("hour", "Registros por hora")}
+          onExport={() => void exportChart("hour", "Llamadas recibidas por hora")}
         >
           <div ref={hourChartRef} className={styles.exportFrame}>
             {renderHourChart()}
@@ -2755,21 +3111,20 @@ export default function Home() {
         </ChartPanel>
 
         <ChartPanel
-          title="Status name"
-          meta={`${byStatus.length} tipos`}
+          title="Categorías"
+          meta={`${statusChartData.length} categorías`}
           onExpand={() => setExpandedChart("status")}
-          onExport={() => void exportChart("status", "Status name")}
+          onExport={() => void exportChart("status", "Categorías")}
+          info="Campo: status_name. Cuenta las llamadas por categoría. Al seleccionar una categoría, las demás permanecen visibles y atenuadas; el filtro se combina con los demás dashboards."
         >
-          <div ref={statusChartRef} className={styles.exportFrame}>
-            {renderStatusChart()}
-          </div>
+          <div ref={statusChartRef} className={styles.exportFrame}>{renderStatusChart()}</div>
         </ChartPanel>
 
         <ChartPanel
-          title="Campaign ID"
+          title="Campañas"
           meta={`${byCampaign.length} campañas`}
           onExpand={() => setExpandedChart("campaign")}
-          onExport={() => void exportChart("campaign", "Campaign ID")}
+          onExport={() => void exportChart("campaign", "Campañas")}
         >
           <div ref={campaignChartRef} className={styles.exportFrame}>
             {renderCampaignChart()}
@@ -2777,86 +3132,33 @@ export default function Home() {
         </ChartPanel>
       </section>
 
-      <section className={styles.dashboardGrid} onClick={stopInsideClick}>
-        <ChartPanel title="Mapa de calor I1" meta="Llamadas por día y hora">
+      <section className={`${styles.dashboardGrid} ${styles.fullWidthDashboard}`} onClick={stopInsideClick}>
+        <ChartPanel title="Mapa de calor I1" meta="Llamadas por día y hora · 07:00 a 23:00">
           <HeatmapGrid cells={callHeatmap} formatter={(value) => `${value.toLocaleString("es-PE")} llamadas`} />
         </ChartPanel>
       </section>
 
-      <section className={styles.bottomGrid} onClick={stopInsideClick}>
-        <article className={styles.panel}>
-          <div className={styles.panelHeader}>
-            <div>
-              <h2>Usuarios</h2>
-              <span>{byUser.length} usuarios</span>
-            </div>
-          </div>
-          <div className={styles.rankList}>
-            {byUser.map((item, index) => (
-              <button
-                className={`${styles.rankItem} ${pointIsSelected("user", item) ? styles.rankItemActive : ""}`}
-                key={item.name}
-                type="button"
-                onClick={() => setFilter("user", "Usuario", item.name)}
-              >
-                <span>{index + 1}</span>
-                <strong>{item.name}</strong>
-                <div>
-                  <i style={{ width: `${Math.max(8, (item.total / userChartMax) * 100)}%` }} />
-                </div>
-                <em>{pointLabel("user", item)}</em>
-              </button>
-            ))}
-          </div>
-        </article>
-
-        <article className={styles.panel}>
-          <div className={styles.panelHeader}>
-            <div>
-              <h2>{activeFilter ? `Detalle de ${activeFilter.value}` : "Detalle completo"}</h2>
-              <span>
-                {visibleRows.length.toLocaleString("es-PE")} registros
-                {hiddenDetailRows ? `, mostrando ${detailRows.length.toLocaleString("es-PE")} para mantener fluidez` : ""}
-              </span>
-            </div>
-          </div>
-          {activeFilter ? (
-            <div className={styles.userSummary}>
-              <div>
-                <span>Status name</span>
-                <strong>{detailStatuses.map((item) => `${item.name}: ${item.total}`).join(" | ")}</strong>
-              </div>
-              <div>
-                <span>Campaign ID</span>
-                <strong>{detailCampaigns.map((item) => `${item.name}: ${item.total}`).join(" | ")}</strong>
-              </div>
-              <div>
-                <span>Usuarios</span>
-                <strong>{detailUsers.map((item) => `${item.name}: ${item.total}`).join(" | ")}</strong>
-              </div>
-            </div>
-          ) : null}
-          <div className={styles.tableWrap}>
-            <table>
-              <thead>
-                <tr>
-                  {detailColumns.map((column) => (
-                    <th key={column}>{column}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {detailRows.map((row) => (
-                  <tr key={row.id}>
-                    {detailColumns.map((column) => (
-                      <td key={`${row.id}-${column}`}>{displayCellValue(column, row.raw[column])}</td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </article>
+      <section className={styles.serviceSection} onClick={stopInsideClick}>
+        <div className={styles.dashboardGrid}>
+          <ChartPanel title="Nivel de atención por mes" meta="NA: atendidas / recibidas · Meta ≥ 90%" info="Campos: length_in_sec y call_date. Llamada atendida = length_in_sec > 0. Nivel de Atención (NA) = llamadas atendidas / llamadas recibidas × 100. Meta operativa: NA ≥ 90%.">
+            {renderServiceQualityChart()}
+          </ChartPanel>
+          <ChartPanel title="TMO por mes" meta="Tiempo medio de operación">
+            {renderServiceDurationChart()}
+          </ChartPanel>
+          <ChartPanel title="Abandono por mes" meta="Recibidas menos atendidas">
+            {renderAbandonmentChart()}
+          </ChartPanel>
+          <ChartPanel title="Distribución de duración" meta="Segundos por llamada" info="Campo: length_in_sec. Agrupa las llamadas en rangos de duración para identificar concentración operativa.">
+            {renderDurationDistribution()}
+          </ChartPanel>
+          <ChartPanel title="Rendimiento por usuario" meta="Recibidas y atendidas" info="Campos: user y length_in_sec. Compara llamadas recibidas contra atendidas por usuario.">
+            {renderUserPerformance()}
+          </ChartPanel>
+          <ChartPanel title="Datos crudos filtrados" meta={`${visibleRows.length.toLocaleString("es-PE")} filas`} info="Muestra las filas originales que alimentan los gráficos, respetando todos los filtros activos.">
+            {renderRawCallRows()}
+          </ChartPanel>
+        </div>
       </section>
         </>
       ) : null}
@@ -2867,10 +3169,10 @@ export default function Home() {
             <div className={styles.modalHeader}>
               <div>
                 <h2>
-                  {expandedChart === "date" ? "Registros por fecha" : null}
-                  {expandedChart === "hour" ? "Registros por hora" : null}
-                  {expandedChart === "status" ? "Status name" : null}
-                  {expandedChart === "campaign" ? "Campaign ID" : null}
+                  {expandedChart === "date" ? "Llamadas por mes" : null}
+                  {expandedChart === "hour" ? "Llamadas recibidas por hora" : null}
+                  {expandedChart === "status" ? "Categorías" : null}
+                  {expandedChart === "campaign" ? "Campañas" : null}
                 </h2>
                 <span>Haz clic en una parte del grafico para filtrar toda la vista</span>
               </div>
