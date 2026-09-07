@@ -24,6 +24,7 @@ import {
   Clock3,
   ClipboardList,
   Download,
+  ArrowDownAZ,
   FileSpreadsheet,
   Hash,
   Info,
@@ -90,7 +91,7 @@ type UserPerformancePoint = { name: string; received: number; attended: number; 
 
 type FilterField = "date" | "week" | "month" | "hour" | "statusName" | "campaignId" | "user" | "listName";
 type ChartKind = "date" | "hour" | "status" | "campaign";
-type DashboardView = "calls" | "matrix" | "errors" | "performance";
+type DashboardView = "calls" | "matrix" | "sales" | "errors" | "performance";
 type TimelineScale = "30m" | "1h" | "day";
 
 type ChartClickState = {
@@ -258,8 +259,129 @@ const heatmapDays = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
 const heatmapStartHour = 7;
 const heatmapEndHour = 23;
 const persistedCallsKey = "a365-i1-calls-v1";
+const persistedDashboardKey = "a365-dashboard-state-v1";
 
 type PersistedCalls = { fileName: string; columns: string[]; rows: MetricRow[] };
+type PersistedDashboardState = {
+  matrixRows: MatrixRow[];
+  matrixColumns: string[];
+  matrixRangeLabel: string;
+  matrixFileName: string;
+  dashboardFocus: Partial<Record<FilterField, string>>;
+  selectedStatusNames: string[];
+  statusFocus: string | null;
+  callStartDate: string;
+  callEndDate: string;
+  activeView: DashboardView;
+  timelineDay: string;
+  timelineScale: TimelineScale;
+  showSlowResolutionOnly: boolean;
+  emailHourChronological: boolean;
+};
+
+type SalesRow = {
+  id: number;
+  year: string;
+  month: string;
+  day: string;
+  date: string;
+  advancedSale: string;
+  company: string;
+  region: string;
+  branch: string;
+  seller: string;
+  sellerMerchandise: string;
+  clientCode: string;
+  clientName: string;
+  ruc: string;
+  documentType: string;
+  productCode: string;
+  productDescription: string;
+  unit: string;
+  className: string;
+  group: string;
+  business: string;
+  industry: string;
+  application: string;
+  branchLine: string;
+  volumeSold: number;
+  conversionFactor: number;
+  tons: number;
+  amountPEN: number;
+  amountUSD: number;
+  raw: Record<string, string>;
+};
+
+type SalesTab = "summary" | "evolution" | "branches" | "products" | "clients" | "industries" | "advanced";
+
+const salesColumnAliases = {
+  year: ["año", "ano", "year"], month: ["mes", "month"], day: ["dia", "día", "day"], advancedSale: ["venta adelantada?", "venta adelantada", "venta adelantada ?"], company: ["compañia", "compania", "company"], region: ["región", "region"], branch: ["sucursal"], seller: ["nombre vendedor"], sellerMerchandise: ["nom.vend.mercaderia", "nom vend mercaderia"], clientCode: ["cod.clte", "cod clte", "codigo cliente"], clientName: ["nombre del cliente"], ruc: ["ruc"], documentType: ["tipo documento"], productCode: ["cod.producto", "cod producto"], productDescription: ["descripcion", "descripción"], unit: ["unidad"], className: ["clase"], group: ["grupo"], business: ["negocio"], industry: ["industria"], application: ["aplicación", "aplicacion"], branchLine: ["rama"], volumeSold: ["volumen vendido"], conversionFactor: ["factor conversion a kg.", "factor conversión a kg", "factor conversion a kg"], tons: ["volumen en tonelada"], amountPEN: ["importe vendido s/.", "importe vendido s/", "importe vendido soles"], amountUSD: ["importe vendido us$", "importe vendido usd", "importe vendido us$."] as string[],
+};
+
+function salesNumber(value: unknown) {
+  const text = valueAsText(value).replace(/[^0-9,.-]/g, "").trim();
+  if (!text) return 0;
+  const normalized = text.includes(",") && text.includes(".") ? text.replace(/\./g, "").replace(",", ".") : text.replace(",", ".");
+  const number = Number(normalized);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function salesDisplayName(value: string) {
+  return value.replace(/^\s*\d+\s*-\s*/, "").trim() || "Sin dato";
+}
+
+function mapSalesRows(sheetRows: Row[]) {
+  const rawRows = rowsFromSheetRows(sheetRows);
+  if (!rawRows.length) return [];
+  const headers = Object.keys(rawRows[0]);
+  const columns = Object.fromEntries(Object.entries(salesColumnAliases).map(([key, aliases]) => [key, findColumn(headers, aliases)])) as Record<string, string | undefined>;
+  const required = ["year", "month", "day", "region", "branch", "clientCode", "productCode", "className", "amountUSD"];
+  const missing = required.filter((key) => !columns[key]);
+  if (missing.length) throw new Error(`Faltan columnas de RESUMEN: ${missing.join(", ")}`);
+  return rawRows.map((row, index) => {
+    const text = (key: string) => valueAsText(columns[key] ? row[columns[key] as string] : "");
+    const year = text("year");
+    const month = text("month").padStart(2, "0");
+    const day = text("day").padStart(2, "0");
+    const date = `${year}-${month}-${day}`;
+    return { id: index + 1, year, month, day, date, advancedSale: text("advancedSale"), company: text("company"), region: text("region"), branch: text("branch") || "Sin sucursal", seller: text("seller") || "Sin vendedor", sellerMerchandise: text("sellerMerchandise"), clientCode: text("clientCode") || "Sin cliente", clientName: text("clientName") || "Sin cliente", ruc: text("ruc"), documentType: text("documentType") || "Sin documento", productCode: text("productCode") || "Sin producto", productDescription: text("productDescription") || "Sin producto", unit: text("unit") || "Sin unidad", className: text("className") || "Sin clase", group: text("group") || "Sin grupo", business: text("business") || "Sin negocio", industry: text("industry") || "Sin industria", application: text("application") || "Sin aplicación", branchLine: text("branchLine"), volumeSold: salesNumber(columns.volumeSold ? row[columns.volumeSold] : ""), conversionFactor: salesNumber(columns.conversionFactor ? row[columns.conversionFactor] : ""), tons: salesNumber(columns.tons ? row[columns.tons] : ""), amountPEN: salesNumber(columns.amountPEN ? row[columns.amountPEN] : ""), amountUSD: salesNumber(columns.amountUSD ? row[columns.amountUSD] : ""), raw: headers.reduce<Record<string, string>>((record, header) => { record[header] = valueAsText(row[header]); return record; }, {}) } satisfies SalesRow;
+  }).filter((row) => row.year && row.month && row.day);
+}
+
+function salesCountDistinct(rows: SalesRow[], key: keyof SalesRow) {
+  return new Set(rows.map((row) => String(row[key])).filter(Boolean)).size;
+}
+
+function salesGrouped(rows: SalesRow[], key: keyof SalesRow, valueKey: keyof SalesRow = "amountUSD") {
+  const map = new Map<string, number>();
+  rows.forEach((row) => { const name = String(row[key] || "Sin dato"); map.set(name, (map.get(name) ?? 0) + Number(row[valueKey] ?? 0)); });
+  return Array.from(map.entries()).map(([name, total]) => ({ name, total })).sort((a, b) => key === "month" || key === "date" ? a.name.localeCompare(b.name) : b.total - a.total);
+}
+
+function salesPurchaseFrequency(rows: SalesRow[]) {
+  const byClient = new Map<string, { name: string; dates: number[]; total: number }>();
+  rows.forEach((row) => {
+    const key = row.clientCode || row.clientName || "Sin cliente";
+    const item = byClient.get(key) ?? { name: row.clientName || key, dates: [], total: 0 };
+    const timestamp = Date.parse(`${row.date}T00:00:00Z`);
+    if (Number.isFinite(timestamp)) item.dates.push(timestamp);
+    item.total += row.amountUSD;
+    byClient.set(key, item);
+  });
+  return Array.from(byClient.values()).map((item) => {
+    const dates = Array.from(new Set(item.dates)).sort((a, b) => a - b);
+    const intervals = dates.slice(1).map((date, index) => (date - dates[index]) / 86_400_000);
+    return { name: item.name, total: intervals.length ? intervals.reduce((sum, days) => sum + days, 0) / intervals.length : 0, purchases: dates.length, salesTotal: item.total };
+  }).filter((item) => item.purchases > 1).sort((a, b) => b.salesTotal - a.salesTotal).slice(0, 10);
+}
+
+function formatSalesUSD(value: number) {
+  const absolute = Math.abs(value);
+  if (absolute >= 1_000_000) return `USD ${(value / 1_000_000).toFixed(1)} M`;
+  if (absolute >= 1_000) return `USD ${(value / 1_000).toFixed(1)} k`;
+  return `USD ${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+function formatSalesPEN(value: number) { return `S/ ${value.toLocaleString("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; }
 
 function readPersistedCalls(): PersistedCalls | null {
   if (typeof window === "undefined") return null;
@@ -268,6 +390,15 @@ function readPersistedCalls(): PersistedCalls | null {
     return parsed && Array.isArray(parsed.rows) && parsed.rows.length
       ? { fileName: parsed.fileName || "Archivo recuperado", columns: parsed.columns ?? Object.keys(parsed.rows[0]?.raw ?? {}), rows: parsed.rows }
       : null;
+  } catch {
+    return null;
+  }
+}
+
+function readPersistedDashboard(): Partial<PersistedDashboardState> | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return JSON.parse(window.localStorage.getItem(persistedDashboardKey) ?? "null") as Partial<PersistedDashboardState> | null;
   } catch {
     return null;
   }
@@ -313,7 +444,15 @@ function buildCallHeatmap(rows: MetricRow[]) {
 }
 
 function buildEmailHeatmap(rows: MatrixRow[]) {
-  return buildHeatmapCells(rows.map((row) => ({ date: row.dateEmail, hour: row.dateEmail, value: 1 })));
+  return buildHeatmapCells(rows.flatMap((row) => {
+    const date = parseDateTimeValue(row.dateEmail);
+    if (!date) return [];
+    return [{
+      date: row.dateEmail,
+      hour: `${String(date.getHours()).padStart(2, "0")}:00`,
+      value: 1,
+    }];
+  }));
 }
 
 function HeatmapGrid({ cells, formatter }: { cells: HeatmapCell[]; formatter: (value: number) => string }) {
@@ -327,8 +466,10 @@ function HeatmapGrid({ cells, formatter }: { cells: HeatmapCell[]; formatter: (v
           <span key={`${day}-label`} className={styles.heatmapRowLabel}>{day}</span>,
           ...cells.slice(dayIndex * heatmapHours.length, dayIndex * heatmapHours.length + heatmapHours.length).map((cell) => {
             const intensity = max ? 0.08 + (cell.value / max) * 0.92 : 0.08;
-            const style = { "--heatmap-alpha": intensity, "--heatmap-value": cell.value } as CSSProperties;
-            return <div key={`${cell.day}-${cell.hour}`} className={styles.heatmapCell} style={style} title={`${cell.day} ${String(cell.hour).padStart(2, "0")}:00 · ${formatter(cell.value)}`} />;
+            const ratio = max ? cell.value / max : 0;
+            const rgb = ratio >= 0.66 ? "220, 38, 38" : ratio >= 0.33 ? "249, 115, 22" : "250, 204, 21";
+            const style = { "--heatmap-alpha": intensity, "--heatmap-value": cell.value, backgroundColor: `rgba(${rgb}, ${0.2 + ratio * 0.8})` } as CSSProperties;
+            return <div key={`${cell.day}-${cell.hour}`} className={styles.heatmapCell} style={{ ...style, color: ratio >= 0.55 ? "#ffffff" : "#0f172a" }} title={`${cell.day} ${String(cell.hour).padStart(2, "0")}:00 · ${formatter(cell.value)}`}><span>{cell.value.toLocaleString("es-PE")}</span></div>;
           }),
         ])}
       </div>
@@ -360,7 +501,6 @@ type MonthlyCallPoint = {
   name: string;
   received: number;
   attended: number;
-  attendedOver20: number;
 };
 
 type ServiceMonthlyPoint = {
@@ -798,6 +938,14 @@ function slaMinutesBetween(start: string, end: string) {
   return totalMinutes;
 }
 
+function signedMinutesBetween(start: string, end: string) {
+  const startDate = parseDateTimeValue(start);
+  const endDate = parseDateTimeValue(end);
+
+  if (!startDate || !endDate) return null;
+  return Math.round((endDate.getTime() - startDate.getTime()) / 60000);
+}
+
 function averageMinutes(values: Array<number | null>) {
   const validValues = values.filter((value): value is number => typeof value === "number");
 
@@ -908,6 +1056,23 @@ function countMatrixBy(rows: MatrixRow[], key: keyof MatrixRow) {
   const map = new Map<string, number>();
   rows.forEach((row) => addToCount(map, String(row[key] || "Sin dato")));
   return pointsFromMap(map);
+}
+
+function countMatrixByCaseInsensitive(rows: MatrixRow[], key: keyof MatrixRow) {
+  const groups = new Map<string, ChartPoint>();
+  rows.forEach((row) => {
+    const original = String(row[key] || "Sin dato").trim() || "Sin dato";
+    const normalized = normalizeKey(original) || "sin dato";
+    const current = groups.get(normalized);
+    if (current) {
+      current.total += 1;
+    } else {
+      groups.set(normalized, { name: original, total: 1 });
+    }
+  });
+  return Array.from(groups.values())
+    .filter((point) => normalizeKey(point.name) !== "sin dato")
+    .sort((a, b) => b.total - a.total);
 }
 
 function dateKeyFromDateTime(value: string) {
@@ -1096,7 +1261,7 @@ function buildMatrixSummary(rows: MatrixRow[]): MatrixSummary {
     completed: rows.filter((row) => normalizeKey(row.estadoRegistro).includes("terminado")).length,
     byTipificacion: countMatrixBy(rows, "tipificacion"),
     byEstado: countMatrixBy(rows, "estadoRegistro"),
-    byUser: countMatrixBy(rows, "usuarioAsignado"),
+    byUser: countMatrixByCaseInsensitive(rows, "usuarioAsignado"),
     avgByAgent: averageMatrixTimes(rows, (row) => row.usuarioAsignado),
     avgByDay: averageMatrixTimes(rows, (row) => dateKeyFromDateTime(row.dateEmail), "name"),
     avgByMonth: averageMatrixTimes(rows, (row) => monthKeyFromDateTime(row.dateEmail), "name"),
@@ -1269,7 +1434,7 @@ function matrixEmailKey(row: MatrixRow) {
 
 function isEmailAttended(row: MatrixRow) {
   const status = normalizeKey(row.estadoRegistro);
-  return Boolean(row.fechaAsignacion || row.fechaRegistro || ["terminado", "completado", "atendido", "resuelto", "cerrado"].some((value) => status.includes(value)));
+  return ["terminado", "completado", "atendido", "resuelto", "cerrado"].some((value) => status.includes(value));
 }
 
 function buildEmailSummary(rows: MatrixRow[]): EmailSummary {
@@ -1281,8 +1446,11 @@ function buildEmailSummary(rows: MatrixRow[]): EmailSummary {
   });
   const calls = Array.from(unique.values());
   const attended = calls.filter(isEmailAttended);
-  const withinSla = calls.filter((row) => row.minutesToAssign !== null && row.minutesToAssign >= 0 && row.minutesToAssign <= EMAIL_SLA_MINUTES);
-  const validTmo = attended.map((row) => row.minutesToRegister).filter((value): value is number => value !== null && value >= 0);
+  const withinSla = calls.filter((row) => {
+    const registrationMinutes = signedMinutesBetween(row.dateEmail, row.fechaRegistro);
+    return registrationMinutes !== null && registrationMinutes <= EMAIL_SLA_MINUTES;
+  });
+  const validTmo = attended.map((row) => row.minutesTotal).filter((value): value is number => value !== null && value >= 0);
   const monthMap = new Map<string, MatrixRow[]>();
   calls.forEach((row) => {
     const month = monthKeyFromDateTime(row.dateEmail);
@@ -1290,11 +1458,14 @@ function buildEmailSummary(rows: MatrixRow[]): EmailSummary {
   });
   const byMonth = Array.from(monthMap.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([name, monthRows]) => {
     const monthAttended = monthRows.filter(isEmailAttended);
-    const monthSla = monthRows.filter((row) => row.minutesToAssign !== null && row.minutesToAssign >= 0 && row.minutesToAssign <= EMAIL_SLA_MINUTES);
-    const monthTmo = monthAttended.map((row) => row.minutesToRegister).filter((value): value is number => value !== null && value >= 0);
+    const monthSla = monthRows.filter((row) => {
+      const registrationMinutes = signedMinutesBetween(row.dateEmail, row.fechaRegistro);
+      return registrationMinutes !== null && registrationMinutes <= EMAIL_SLA_MINUTES;
+    });
+    const monthTmo = monthAttended.map((row) => row.minutesTotal).filter((value): value is number => value !== null && value >= 0);
     return { name, received: monthRows.length, attended: monthAttended.length, withinSla: monthSla.length, nda: percentage(monthAttended.length, monthRows.length), nds: percentage(monthSla.length, monthRows.length), tmoMinutes: monthTmo.length ? monthTmo.reduce((sum, value) => sum + value, 0) / monthTmo.length : null };
   });
-  const points = (key: keyof MatrixRow) => countMatrixBy(calls, key);
+  const points = (key: keyof MatrixRow) => key === "usuarioAsignado" ? countMatrixByCaseInsensitive(calls, key) : countMatrixBy(calls, key);
   const hours = new Map<string, number>();
   calls.forEach((row) => { const date = parseDateTimeValue(row.dateEmail); const hour = date ? `${String(date.getHours()).padStart(2, "0")}:00` : "Sin hora"; hours.set(hour, (hours.get(hour) ?? 0) + 1); });
   return { received: calls.length, attended: attended.length, withinSla: withinSla.length, nda: percentage(attended.length, calls.length), nds: percentage(withinSla.length, calls.length), tmoMinutes: validTmo.length ? validTmo.reduce((sum, value) => sum + value, 0) / validTmo.length : null, byMonth, byUser: points("usuarioAsignado"), byTipificacion: points("tipificacion"), byMotivo: points("motivo").filter((point) => point.name !== "Sin motivo"), byHour: pointsFromMap(hours) , period: byMonth.length ? `${byMonth[0].name} a ${byMonth[byMonth.length - 1].name}` : "Sin periodo" };
@@ -1319,7 +1490,7 @@ function countAttendedCalls(rows: MetricRow[], statusNames: string[] = []) {
 function buildMonthlyCallPoints(rows: MetricRow[], statusNames: string[], focusedStatusName?: string | null): MonthlyCallPoint[] {
   const months = new Map<string, MonthlyCallPoint>();
   rows.forEach((row) => {
-    if (!months.has(row.month)) months.set(row.month, { name: row.month, received: 0, attended: 0, attendedOver20: 0 });
+    if (!months.has(row.month)) months.set(row.month, { name: row.month, received: 0, attended: 0 });
   });
 
   rows.forEach((row) => {
@@ -1330,9 +1501,6 @@ function buildMonthlyCallPoints(rows: MetricRow[], statusNames: string[], focuse
 
     if (matchesAttendedDefinition(row, statusNames)) {
       point.attended += 1;
-      if (row.durationSeconds > 20) {
-        point.attendedOver20 += 1;
-      }
     }
 
   });
@@ -1442,16 +1610,19 @@ function StatCard({
   icon,
   label,
   value,
+  comparison,
 }: {
   icon: ReactNode;
   label: string;
   value: string | number;
+  comparison?: ReactNode;
 }) {
   return (
     <div className={styles.statCard}>
       <div className={styles.statIcon}>{icon}</div>
       <span>{label}</span>
       <strong>{value}</strong>
+      {comparison ? <small className={styles.statComparison}>{comparison}</small> : null}
     </div>
   );
 }
@@ -1493,6 +1664,11 @@ function stopInsideClick(event: ReactMouseEvent<HTMLElement>) {
   event.stopPropagation();
 }
 
+function matrixUserNameFromChartEntry(entry: unknown) {
+  const point = entry as { name?: unknown; payload?: Partial<ChartPoint> };
+  return point.payload?.name ? String(point.payload.name) : point.name ? String(point.name) : undefined;
+}
+
 function rowsForDashboardFocus(rows: MetricRow[], focus: Partial<Record<FilterField, string>>, excludedField?: FilterField) {
   return rows.filter((row) => Object.entries(focus).every(([field, value]) => field === excludedField || !value || row[field as FilterField] === value));
 }
@@ -1521,7 +1697,7 @@ function buildUserPerformance(rows: MetricRow[]): UserPerformancePoint[] {
 }
 
 const chartInfoByTitle: Record<string, string> = {
-  "Llamadas por mes": "Campos: call_date (para obtener el mes), status_name (filtro opcional) y length_in_sec (atendida si > 0; atendida >20 s si > 20). Fórmula: contar registros por mes; campaign_id LINDESAC se excluye antes del conteo.",
+  "Llamadas por mes": "Campos: call_date (para obtener el mes), status_name (filtro opcional) y length_in_sec (atendida si > 0). Fórmula: contar registros recibidos y atendidos por mes; campaign_id LINDESAC se excluye antes del conteo.",
   "Llamadas recibidas por hora": "Campos: call_date y hour (hora normalizada). Fórmula: contar registros agrupados por hora; no usa lead_id.",
   "Estados de llamada": "Campo: status_name. Fórmula: contar registros por estado. Al hacer clic en un estado, sólo se enfoca visualmente este dashboard; las demás categorías permanecen visibles y atenuadas.",
   "Campañas": "Campo: campaign_id. Fórmula: contar registros agrupados por campaña; se excluye LINDESAC.",
@@ -1539,6 +1715,7 @@ function ChartPanel({
   onExport,
   actions,
   info,
+  comparison,
 }: {
   title: string;
   meta: string;
@@ -1547,6 +1724,7 @@ function ChartPanel({
   onExport?: () => void;
   actions?: ReactNode;
   info?: string;
+  comparison?: ReactNode;
 }) {
   const panelInfo = info ?? chartInfoByTitle[title] ?? `Dashboard ${title}. Los datos se calculan dinámicamente desde el archivo cargado.`;
 
@@ -1556,6 +1734,7 @@ function ChartPanel({
         <div>
           <h2>{title}</h2>
           <span>{meta}</span>
+          {comparison}
         </div>
         {actions || onExport || onExpand || info ? (
           <div className={styles.headerActions}>
@@ -1610,12 +1789,23 @@ export default function Home() {
   const [extensionReady, setExtensionReady] = useState(false);
   const [timelineDay, setTimelineDay] = useState("");
   const [timelineScale, setTimelineScale] = useState<TimelineScale>("day");
+  const [emailHourChronological, setEmailHourChronological] = useState(false);
   const [showSlowResolutionOnly, setShowSlowResolutionOnly] = useState(false);
+  const [persistenceReady, setPersistenceReady] = useState(false);
+  const [matrixDayDetail, setMatrixDayDetail] = useState<string | null>(null);
+  const [matrixUserFocus, setMatrixUserFocus] = useState<string | null>(null);
   const [hoveredTimelineId, setHoveredTimelineId] = useState<string | null>(null);
   const [incidentRows, setIncidentRows] = useState<IncidentRow[]>([]);
   const [incidentColumns, setIncidentColumns] = useState<string[]>([]);
   const [incidentFileName, setIncidentFileName] = useState("Sin archivo cargado");
   const [incidentError, setIncidentError] = useState("");
+  const salesInputRef = useRef<HTMLInputElement>(null);
+  const [salesRows, setSalesRows] = useState<SalesRow[]>([]);
+  const [salesFileName, setSalesFileName] = useState("Sin archivo cargado");
+  const [salesError, setSalesError] = useState("");
+  const [salesTab, setSalesTab] = useState<SalesTab>("summary");
+  const [salesFilters, setSalesFilters] = useState<Record<string, string>>({});
+  const [salesCompareRegions, setSalesCompareRegions] = useState(false);
 
   const dateFilteredRows = useMemo(
     () => rows.filter((row) => (!callStartDate && !callEndDate) || (row.date !== "Sin fecha" && (!callStartDate || row.date >= callStartDate) && (!callEndDate || row.date <= callEndDate))),
@@ -1647,6 +1837,19 @@ export default function Home() {
     [monthChartRows, selectedStatusNames, statusFocus],
   );
   const serviceSummary = useMemo(() => buildServiceSummary(visibleRows, selectedStatusNames), [selectedStatusNames, visibleRows]);
+  const callMonthComparison = (valueFor: (month: MonthlyCallPoint | ServiceMonthlyPoint) => number | null) => {
+    const months = serviceSummary.byMonth.length >= 2 ? serviceSummary.byMonth : monthlyCallData;
+    if (months.length < 2) return null;
+    const previous = valueFor(months[months.length - 2]);
+    const current = valueFor(months[months.length - 1]);
+    if (previous === null || current === null || previous === 0) return "N/D";
+    const change = ((current - previous) / previous) * 100;
+    return `${change >= 0 ? "↑" : "↓"} ${Math.abs(change).toFixed(1)}%`;
+  };
+  const callComparisonBadge = (label: string, valueFor: (month: MonthlyCallPoint | ServiceMonthlyPoint) => number | null) => {
+    const value = callMonthComparison(valueFor);
+    return value === null ? null : <span className={styles.comparisonBadge}>VS mes anterior · {label}: {value}</span>;
+  };
   const byHour = useMemo(() => buildDashboardSummary(hourChartRows).byHour, [hourChartRows]);
   const allStatus = fullSummary.byStatus;
   const byStatus = statusChartSummary.byStatus;
@@ -1662,9 +1865,51 @@ export default function Home() {
   const visibleMatrixRows = showSlowResolutionOnly ? slowResolutionRows : matrixRows;
   const matrixSummary = useMemo(() => buildMatrixSummary(visibleMatrixRows), [visibleMatrixRows]);
   const emailSummary = useMemo(() => buildEmailSummary(visibleMatrixRows), [visibleMatrixRows]);
+  const emailMonthComparison = (label: string, valueFor: (month: EmailMonthPoint) => number | null) => {
+    const months = emailSummary.byMonth.filter((month) => month.name !== "Sin mes");
+    if (months.length < 2) return null;
+    const previous = valueFor(months[months.length - 2]);
+    const current = valueFor(months[months.length - 1]);
+    if (previous === null || current === null || previous === 0) {
+      return <span className={styles.comparisonBadge}>VS {months[months.length - 2].name} → {months[months.length - 1].name} · {label}: N/D</span>;
+    }
+    const change = ((current - previous) / previous) * 100;
+    return <span className={`${styles.comparisonBadge} ${change >= 0 ? styles.comparisonUp : styles.comparisonDown}`}>VS {months[months.length - 2].name} → {months[months.length - 1].name} · {label}: {change >= 0 ? "↑" : "↓"} {Math.abs(change).toFixed(1)}%</span>;
+  };
+  const emailMonthDelta = (valueFor: (month: EmailMonthPoint) => number | null) => {
+    const months = emailSummary.byMonth.filter((month) => month.name !== "Sin mes");
+    if (months.length < 2) return "N/D";
+    const previous = valueFor(months[months.length - 2]);
+    const current = valueFor(months[months.length - 1]);
+    if (previous === null || current === null || previous === 0) return "N/D";
+    const change = ((current - previous) / previous) * 100;
+    return `${change >= 0 ? "↑" : "↓"} ${Math.abs(change).toFixed(1)}%`;
+  };
+  const emailVolumeComparison = emailMonthComparison("volumen", (month) => month.received);
+  const emailHourData = useMemo(
+    () => emailHourChronological
+      ? [...emailSummary.byHour].sort((a, b) => {
+          const hourA = Number.parseInt(a.name.slice(0, 2), 10);
+          const hourB = Number.parseInt(b.name.slice(0, 2), 10);
+          if (!Number.isNaN(hourA) && !Number.isNaN(hourB)) return hourA - hourB;
+          if (!Number.isNaN(hourA)) return -1;
+          if (!Number.isNaN(hourB)) return 1;
+          return a.name.localeCompare(b.name);
+        })
+      : emailSummary.byHour,
+    [emailHourChronological, emailSummary.byHour],
+  );
   const emailHeatmap = useMemo(() => buildEmailHeatmap(visibleMatrixRows), [visibleMatrixRows]);
-  const matrixDetailRows = useMemo(() => visibleMatrixRows.slice(0, detailRowLimit), [visibleMatrixRows]);
-  const hiddenMatrixRows = Math.max(0, visibleMatrixRows.length - matrixDetailRows.length);
+  const filteredMatrixRows = useMemo(
+    () => matrixUserFocus ? visibleMatrixRows.filter((row) => normalizeKey(row.usuarioAsignado) === normalizeKey(matrixUserFocus)) : visibleMatrixRows,
+    [matrixUserFocus, visibleMatrixRows],
+  );
+  const matrixDetailRows = useMemo(() => filteredMatrixRows.slice(0, detailRowLimit), [filteredMatrixRows]);
+  const hiddenMatrixRows = Math.max(0, filteredMatrixRows.length - matrixDetailRows.length);
+  const matrixDayDetailRows = useMemo(
+    () => matrixDayDetail ? filteredMatrixRows.filter((row) => dateKeyFromDateTime(row.dateEmail) === matrixDayDetail) : [],
+    [filteredMatrixRows, matrixDayDetail],
+  );
   const timelineDays = useMemo(() => timelineDaysFromRows(visibleMatrixRows), [visibleMatrixRows]);
   const selectedTimelineDay = timelineDays.includes(timelineDay) ? timelineDay : timelineDays[0] ?? "";
   const timelineRows = useMemo(
@@ -1682,6 +1927,21 @@ export default function Home() {
   const performanceChartHeight = Math.max(320, Math.min(760, performanceSummary.byAgent.length * 44));
   const campaignChartHeight = Math.max(280, Math.min(760, byCampaign.length * 38));
   const matrixUserChartHeight = Math.max(280, Math.min(620, matrixSummary.byUser.length * 38));
+  const salesFilteredRows = useMemo(() => salesRows.filter((row) => Object.entries(salesFilters).every(([key, value]) => !value || String(row[key as keyof SalesRow] ?? "") === value)), [salesFilters, salesRows]);
+  const salesComparisonRows = useMemo(() => salesRows.filter((row) => Object.entries(salesFilters).every(([key, value]) => key === "region" || !value || String(row[key as keyof SalesRow] ?? "") === value)), [salesFilters, salesRows]);
+  const salesRegions = useMemo(() => Array.from(new Set(salesComparisonRows.map((row) => row.region).filter(Boolean))).sort((a, b) => a.localeCompare(b)).slice(0, 2), [salesComparisonRows]);
+  const salesMonths = useMemo(() => {
+    const map = new Map<string, { name: string; total: number; tons: number; records: number; clients: Set<string>; products: Set<string> }>();
+    salesFilteredRows.forEach((row) => { const item = map.get(row.date.slice(0, 7)) ?? { name: row.date.slice(0, 7), total: 0, tons: 0, records: 0, clients: new Set<string>(), products: new Set<string>() }; item.total += row.amountUSD; item.tons += row.tons; item.records += 1; item.clients.add(row.clientCode); item.products.add(row.productCode); map.set(item.name, item); });
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name)).map((item) => ({ name: item.name, total: item.total, tons: item.tons, records: item.records, clients: item.clients.size, products: item.products.size }));
+  }, [salesFilteredRows]);
+  const salesTotalUSD = salesFilteredRows.reduce((sum, row) => sum + row.amountUSD, 0);
+  const salesBranches = useMemo(() => salesGrouped(salesFilteredRows, "branch"), [salesFilteredRows]);
+  const salesClasses = useMemo(() => salesGrouped(salesFilteredRows, "className").map((point) => ({ ...point, name: salesDisplayName(point.name) })), [salesFilteredRows]);
+  const salesProducts = useMemo(() => salesGrouped(salesFilteredRows, "productDescription").slice(0, 10), [salesFilteredRows]);
+  const salesClients = useMemo(() => salesGrouped(salesFilteredRows, "clientName").slice(0, 5), [salesFilteredRows]);
+  const salesFrequency = useMemo(() => salesPurchaseFrequency(salesFilteredRows), [salesFilteredRows]);
+  const salesIndustries = useMemo(() => salesGrouped(salesFilteredRows, "industry").slice(0, 10).map((point) => ({ ...point, name: salesDisplayName(point.name) })), [salesFilteredRows]);
   const statusTotal = statusChartSummary.total;
   const statusColorFor = (name: string) => chartColor(Math.max(0, allStatusChartData.findIndex((item) => item.name === name)));
   const statusFilterLabel = selectedStatusNames.length
@@ -1697,13 +1957,55 @@ export default function Home() {
 
   useEffect(() => {
     const saved = readPersistedCalls();
-    if (saved) {
-      window.setTimeout(() => {
+    const savedDashboard = readPersistedDashboard();
+    window.setTimeout(() => {
+      if (saved) {
         setRows(saved.rows);
         setFileName(saved.fileName);
-      }, 0);
-    }
+      }
+      if (savedDashboard) {
+        if (Array.isArray(savedDashboard.matrixRows) && savedDashboard.matrixRows.length) setMatrixRows(savedDashboard.matrixRows);
+        if (Array.isArray(savedDashboard.matrixColumns)) setMatrixColumns(savedDashboard.matrixColumns);
+        if (typeof savedDashboard.matrixRangeLabel === "string") setMatrixRangeLabel(savedDashboard.matrixRangeLabel);
+        if (typeof savedDashboard.matrixFileName === "string") setMatrixFileName(savedDashboard.matrixFileName);
+        if (savedDashboard.dashboardFocus) setDashboardFocus(savedDashboard.dashboardFocus);
+        if (Array.isArray(savedDashboard.selectedStatusNames)) setSelectedStatusNames(savedDashboard.selectedStatusNames);
+        if (typeof savedDashboard.statusFocus === "string" || savedDashboard.statusFocus === null) setStatusFocus(savedDashboard.statusFocus);
+        if (typeof savedDashboard.callStartDate === "string") setCallStartDate(savedDashboard.callStartDate);
+        if (typeof savedDashboard.callEndDate === "string") setCallEndDate(savedDashboard.callEndDate);
+        if (savedDashboard.activeView === "calls" || savedDashboard.activeView === "matrix" || savedDashboard.activeView === "sales" || savedDashboard.activeView === "errors" || savedDashboard.activeView === "performance") setActiveView(savedDashboard.activeView);
+        if (typeof savedDashboard.timelineDay === "string") setTimelineDay(savedDashboard.timelineDay);
+        if (savedDashboard.timelineScale === "30m" || savedDashboard.timelineScale === "1h" || savedDashboard.timelineScale === "day") setTimelineScale(savedDashboard.timelineScale);
+        if (typeof savedDashboard.showSlowResolutionOnly === "boolean") setShowSlowResolutionOnly(savedDashboard.showSlowResolutionOnly);
+        if (typeof savedDashboard.emailHourChronological === "boolean") setEmailHourChronological(savedDashboard.emailHourChronological);
+      }
+      setPersistenceReady(true);
+    }, 0);
   }, []);
+
+  useEffect(() => {
+    if (!persistenceReady) return;
+    try {
+      window.localStorage.setItem(persistedDashboardKey, JSON.stringify({
+        matrixRows,
+        matrixColumns,
+        matrixRangeLabel,
+        matrixFileName,
+        dashboardFocus,
+        selectedStatusNames,
+        statusFocus,
+        callStartDate,
+        callEndDate,
+        activeView,
+        timelineDay,
+        timelineScale,
+        showSlowResolutionOnly,
+        emailHourChronological,
+      } satisfies PersistedDashboardState));
+    } catch {
+      // La persistencia es opcional; el dashboard sigue funcionando si el almacenamiento no tiene espacio.
+    }
+  }, [activeView, callEndDate, callStartDate, dashboardFocus, emailHourChronological, matrixColumns, matrixFileName, matrixRangeLabel, matrixRows, persistenceReady, selectedStatusNames, showSlowResolutionOnly, statusFocus, timelineDay, timelineScale]);
 
   useEffect(() => {
     function handleExtensionMessage(event: MessageEvent) {
@@ -1889,7 +2191,7 @@ export default function Home() {
     );
   }
 
-  function renderMatrixTimeChart(data: TimeAveragePoint[], height = Math.max(280, Math.min(720, data.length * 42))) {
+  function renderMatrixTimeChart(data: TimeAveragePoint[], height = Math.max(280, Math.min(720, data.length * 42)), onPointClick?: (name: string) => void) {
     return data.length ? (
       <div className={styles.scrollChart}>
         <ResponsiveContainer width="100%" height={height}>
@@ -1897,6 +2199,10 @@ export default function Home() {
             data={data}
             layout="vertical"
             margin={{ left: 16, right: 20, top: 8, bottom: 0 }}
+            onClick={onPointClick ? (state) => {
+              const value = chartClickValue(state as ChartClickState);
+              if (value) onPointClick(value);
+            } : undefined}
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#f8dbe8" />
             <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} />
@@ -1926,12 +2232,18 @@ export default function Home() {
             data={matrixSummary.byUser}
             layout="vertical"
             margin={{ left: 16, right: 20, top: 8, bottom: 0 }}
+            onClick={(state) => {
+              const value = chartClickValue(state as ChartClickState);
+              if (value) setMatrixUserFocus((current) => current === value ? null : value);
+            }}
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#f8dbe8" />
             <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} />
             <YAxis type="category" dataKey="name" tick={{ fontSize: 12 }} width={128} />
             <Tooltip />
-            <Bar dataKey="total" name="Registros" fill="#2563a8" radius={[0, 4, 4, 0]} />
+            <Bar dataKey="total" name="Registros" fill="#2563a8" radius={[0, 4, 4, 0]} onClick={(entry) => { const value = matrixUserNameFromChartEntry(entry); if (value) setMatrixUserFocus((current) => current === value ? null : value); }}>
+              {matrixSummary.byUser.map((entry) => <Cell key={entry.name} fill="#2563a8" opacity={matrixUserFocus && normalizeKey(matrixUserFocus) !== normalizeKey(entry.name) ? 0.2 : 1} />)}
+            </Bar>
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -2288,15 +2600,78 @@ export default function Home() {
             <Bar isAnimationActive={false} dataKey="attended" name="Llamadas atendidas" fill="#0f766e" radius={[4, 4, 0, 0]}>
               {monthlyCallData.map((entry) => <Cell key={`attended-${entry.name}`} fill="#0f766e" opacity={isDimmed("month", entry.name) ? 0.2 : 1} />)}
             </Bar>
-            <Bar isAnimationActive={false} dataKey="attendedOver20" name="Atendidas > 20 segundos" fill="#475569" radius={[4, 4, 0, 0]}>
-              {monthlyCallData.map((entry) => <Cell key={`over20-${entry.name}`} fill="#475569" opacity={isDimmed("month", entry.name) ? 0.2 : 1} />)}
-            </Bar>
           </BarChart>
         </ResponsiveContainer>
       </div>
     ) : (
       <EmptyChart>Sin meses para graficar</EmptyChart>
     );
+  }
+
+  async function loadSalesFile(file: File) {
+    setSalesError("");
+    try {
+      const sheetRows = await readSheet(file, "RESUMEN");
+      const mappedRows = mapSalesRows(sheetRows);
+      if (!mappedRows.length) throw new Error("La hoja RESUMEN no contiene registros válidos.");
+      setSalesRows(mappedRows);
+      setSalesFileName(file.name);
+      setSalesFilters({});
+      setSalesTab("summary");
+    } catch (currentError) {
+      setSalesError(currentError instanceof Error ? currentError.message : "No pude leer la hoja RESUMEN.");
+      setSalesRows([]);
+    }
+  }
+
+  function handleSalesFiles(files: FileList | null) {
+    const file = files?.[0];
+    if (file) void loadSalesFile(file);
+  }
+
+  function renderMatrixMonthlyTimeChart(data: TimeAveragePoint[]) {
+    return data.length ? (
+      <ResponsiveContainer width="100%" height={300}>
+        <BarChart data={data} margin={{ left: 8, right: 16, top: 8, bottom: 8 }}>
+          <CartesianGrid strokeDasharray="3 3" />
+          <XAxis dataKey="name" />
+          <YAxis allowDecimals={false} tickFormatter={(value) => `${value} min`} />
+          <Tooltip formatter={(value, name) => [typeof value === "number" ? formatMinutes(value) : value, name === "asignacion" ? "Asignación" : "Resolución"]} />
+          <Legend />
+          <Bar dataKey="asignacion" name="Asignación" fill="#2563a8" radius={[4, 4, 0, 0]} />
+          <Bar dataKey="resolucion" name="Resolución" fill="#0f766e" radius={[4, 4, 0, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+    ) : <EmptyChart>Sin tiempos para graficar</EmptyChart>;
+  }
+
+  function renderEmailPieChart(data: ChartPoint[]) {
+    const total = data.reduce((sum, point) => sum + point.total, 0);
+    return data.length ? (
+      <div className={styles.statusChartLayout}>
+        <div className={styles.pieFrame}>
+          <ResponsiveContainer width="100%" height={300}>
+            <PieChart>
+              <Pie isAnimationActive={false} data={data} dataKey="total" nameKey="name" innerRadius={64} outerRadius={104} paddingAngle={2}>
+                {data.map((entry, index) => <Cell key={entry.name} fill={chartColor(index)} />)}
+              </Pie>
+              <Tooltip formatter={(value) => [formatPercent(percentage(Number(value), total)), "Porcentaje"]} />
+            </PieChart>
+          </ResponsiveContainer>
+          <div className={styles.pieCenter}>
+            <span>Total</span>
+            <strong>{total.toLocaleString("es-PE")}</strong>
+          </div>
+        </div>
+        <div className={styles.statusLegend}>
+          {data.map((item, index) => (
+            <div key={item.name} className={styles.legendItem}>
+              <span style={{ backgroundColor: chartColor(index) }} /><strong>{item.name}</strong><em>{formatPercent(percentage(item.total, total))}</em>
+            </div>
+          ))}
+        </div>
+      </div>
+    ) : <EmptyChart>Sin datos para graficar</EmptyChart>;
   }
 
   function renderEmailMonthlyChart() {
@@ -2312,7 +2687,7 @@ export default function Home() {
   }
 
   function renderEmailHourChart() {
-    return <ResponsiveContainer width="100%" height={300}><BarChart data={emailSummary.byHour}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis allowDecimals={false} /><Tooltip /><Bar isAnimationActive={false} dataKey="total" name="Correos" fill="#0f766e" /></BarChart></ResponsiveContainer>;
+    return <ResponsiveContainer width="100%" height={300}><BarChart data={emailHourData}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis allowDecimals={false} /><Tooltip /><Bar isAnimationActive={false} dataKey="total" name="Correos" fill="#0f766e" /></BarChart></ResponsiveContainer>;
   }
 
   function renderHourChart(height = 280) {
@@ -2495,6 +2870,45 @@ export default function Home() {
     );
   }
 
+  function renderSalesBar(data: ChartPoint[], color = "#2563a8") {
+    return data.length ? <ResponsiveContainer width="100%" height={Math.max(280, Math.min(560, data.length * 34))}><BarChart data={data} layout="vertical" margin={{ left: 24, right: 24 }}><CartesianGrid strokeDasharray="3 3" /><XAxis type="number" tickFormatter={(value) => formatSalesUSD(Number(value))} /><YAxis type="category" dataKey="name" width={150} tick={{ fontSize: 11 }} /><Tooltip formatter={(value) => formatSalesUSD(Number(value))} /><Bar dataKey="total" name="Venta USD" fill={color} radius={[0, 4, 4, 0]} /></BarChart></ResponsiveContainer> : <EmptyChart>Sin datos para graficar</EmptyChart>;
+  }
+
+  function renderSalesPie(data: ChartPoint[]) {
+    const total = data.reduce((sum, item) => sum + item.total, 0);
+    return data.length ? <div className={styles.statusChartLayout}><div className={styles.pieFrame}><ResponsiveContainer width="100%" height={300}><PieChart><Pie data={data} dataKey="total" nameKey="name" innerRadius={64} outerRadius={105} paddingAngle={2}>{data.map((item, index) => <Cell key={item.name} fill={chartColor(index)} />)}</Pie><Tooltip formatter={(value) => `${formatSalesUSD(Number(value))} · ${formatPercent(percentage(Number(value), total))}`} /></PieChart></ResponsiveContainer><div className={styles.pieCenter}><span>Total</span><strong>{formatSalesUSD(total)}</strong></div></div><div className={styles.statusLegend}>{data.map((item, index) => <div key={item.name} className={styles.legendItem}><span style={{ backgroundColor: chartColor(index) }} /><strong>{salesDisplayName(item.name)}</strong><em>{formatPercent(percentage(item.total, total))}</em></div>)}</div></div> : <EmptyChart>Sin datos para graficar</EmptyChart>;
+  }
+
+  function renderSalesContent() {
+    const monthly = salesMonths.map((item) => ({ name: item.name, total: item.total }));
+    const active = salesTab === "summary";
+    return (
+      <>
+        <section className={styles.reportPanel} onClick={stopInsideClick}>
+          <div><small className={styles.reportKicker}>Indicador 03 · Análisis comercial</small><h2>I3 - Análisis comercial / Inside</h2><span className={styles.reportDescription}>Hoja utilizada: RESUMEN · Archivo: {salesFileName} · {salesRows.length.toLocaleString("es-PE")} registros</span></div>
+          <div className={styles.inlineUpload} onClick={() => salesInputRef.current?.click()} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") salesInputRef.current?.click(); }}><FileSpreadsheet size={18} /><span>{salesFileName}</span><strong>Cargar Excel de ventas</strong><input ref={salesInputRef} type="file" accept=".xlsx,.xls,.csv" onChange={(event) => handleSalesFiles(event.target.files)} /></div>
+          {salesError ? <strong className={styles.error}>{salesError}</strong> : null}
+        </section>
+        {salesRows.length ? <>
+          <section className={styles.filterBar} onClick={stopInsideClick}><div className={styles.filterBarHeader}><strong>Filtros comerciales</strong><div className={styles.filterActions}><button type="button" className={styles.chartActionButton} onClick={() => setSalesCompareRegions((current) => !current)}>{salesCompareRegions ? "Salir de VS" : "Abrir VS"}</button><button type="button" className={styles.chartActionButton} onClick={() => setSalesFilters({})}>Limpiar filtros</button></div></div><div className={styles.filterGrid}>{(["year", "month", "region", "branch", "clientName", "className", "group", "business", "industry", "application", "productDescription", "unit"] as Array<keyof SalesRow>).map((key) => { const values = Array.from(new Set(salesRows.map((row) => String(row[key] ?? "")).filter(Boolean))).sort((a, b) => a.localeCompare(b)); return <label key={key}>{key === "clientName" ? "Cliente" : key === "className" ? "Clase" : key === "productDescription" ? "Producto" : key}<select value={salesFilters[key] ?? ""} onChange={(event) => setSalesFilters((current) => ({ ...current, [key]: event.target.value }))}><option value="">Todos</option>{values.map((value) => <option key={value} value={value}>{salesDisplayName(value)}</option>)}</select></label>; })}</div></section>
+          <nav className={styles.subNav} aria-label="Secciones I3">{([ ["summary", "Resumen ejecutivo"], ["evolution", "Evolución"], ["clients", "Clientes"] ] as Array<[SalesTab, string]>).map(([value, label]) => <button key={value} type="button" className={salesTab === value ? styles.topNavActive : ""} onClick={() => setSalesTab(value)}>{label}</button>)}</nav>
+          {salesCompareRegions && salesRegions.length === 2 ? <section className={styles.regionCompareSection}><div className={styles.regionCompareTitle}><div><small>Comparador</small><h2>VS · Comparación por región</h2></div><span>Dos regiones con los mismos indicadores y gráficos</span></div><div className={styles.regionCompareGrid}>{salesRegions.map((region) => { const rows = salesComparisonRows.filter((row) => row.region === region); const total = rows.reduce((sum, row) => sum + row.amountUSD, 0); return <article className={styles.regionCompareCard} key={region}><div className={styles.regionCompareHeader}><h3>{salesDisplayName(region)}</h3><span>{rows.length.toLocaleString("es-PE")} registros</span></div><div className={styles.statsGrid}><StatCard icon={<Hash size={18} />} label="Venta total (USD)" value={formatSalesUSD(total)} /><StatCard icon={<UserRound size={18} />} label="Clientes únicos" value={salesCountDistinct(rows, "clientCode")} /><StatCard icon={<Timer size={18} />} label="Ticket promedio (USD)" value={formatSalesUSD(rows.length ? total / rows.length : 0)} /><StatCard icon={<Timer size={18} />} label="Venta promedio por cliente" value={formatSalesUSD(salesCountDistinct(rows, "clientCode") ? total / salesCountDistinct(rows, "clientCode") : 0)} /></div><ChartPanel title="Ventas mensuales" meta="SUM Importe Vendido US$"><ResponsiveContainer width="100%" height={250}><LineChart data={salesGrouped(rows, "month")}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis tickFormatter={(value) => formatSalesUSD(Number(value))} /><Tooltip formatter={(value) => formatSalesUSD(Number(value))} /><Line type="monotone" dataKey="total" name="Venta USD" stroke="#12355b" strokeWidth={3} dot /></LineChart></ResponsiveContainer></ChartPanel><ChartPanel title="Top 5 clientes" meta="Venta USD">{renderSalesBar(salesGrouped(rows, "clientName").slice(0, 5), "#475569")}</ChartPanel><ChartPanel title="Venta por negocio" meta="Venta USD">{renderSalesBar(salesGrouped(rows, "business").slice(0, 10), "#7c3aed")}</ChartPanel></article>; })}</div></section> : null}\n          {active && !salesCompareRegions ? <><section className={styles.statsGrid}><StatCard icon={<Hash size={18} />} label="Venta total" value={formatSalesUSD(salesTotalUSD)} /><StatCard icon={<UserRound size={18} />} label="Clientes únicos" value={salesCountDistinct(salesFilteredRows, "clientCode")} /><StatCard icon={<Timer size={18} />} label="Ticket promedio" value={formatSalesUSD(salesFilteredRows.length ? salesTotalUSD / salesFilteredRows.length : 0)} /><StatCard icon={<Timer size={18} />} label="Venta promedio por cliente" value={formatSalesUSD(salesCountDistinct(salesFilteredRows, "clientCode") ? salesTotalUSD / salesCountDistinct(salesFilteredRows, "clientCode") : 0)} /></section><div className={styles.dashboardGrid}><ChartPanel title="Evolución mensual de ventas (USD)" meta="SUM Importe Vendido US$"><ResponsiveContainer width="100%" height={300}><LineChart data={monthly}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis tickFormatter={(value) => formatSalesUSD(Number(value))} /><Tooltip formatter={(value) => formatSalesUSD(Number(value))} /><Line type="monotone" dataKey="total" name="Venta USD" stroke="#12355b" strokeWidth={3} dot /></LineChart></ResponsiveContainer></ChartPanel><ChartPanel title="Venta por sucursal" meta="Ordenado de mayor a menor">{renderSalesBar(salesBranches)}</ChartPanel><ChartPanel title="Participación por clase" meta="Porcentaje sobre venta filtrada">{renderSalesPie(salesClasses)}</ChartPanel><ChartPanel title="Top 10 productos por venta" meta="SUM Importe Vendido US$">{renderSalesBar(salesProducts, "#0f766e")}</ChartPanel><ChartPanel title="Top 5 mejores clientes" meta="SUM Importe Vendido US$">{renderSalesBar(salesClients, "#475569")}</ChartPanel><ChartPanel title="Venta por industria" meta="Top 10">{renderSalesBar(salesIndustries, "#0891b2")}</ChartPanel></div></> : null}
+          {salesTab === "evolution" ? <div className={styles.dashboardGrid}><ChartPanel title="Venta diaria (USD)" meta="Fecha = Año + Mes + Dia"><ResponsiveContainer width="100%" height={320}><LineChart data={salesGrouped(salesFilteredRows, "date")}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis tickFormatter={(value) => formatSalesUSD(Number(value))} /><Tooltip formatter={(value) => formatSalesUSD(Number(value))} /><Line type="monotone" dataKey="total" name="Venta USD" stroke="#12355b" dot={false} /></LineChart></ResponsiveContainer></ChartPanel><ChartPanel title="Evolución del volumen vendido" meta="SUM Volumen en Tonelada"><ResponsiveContainer width="100%" height={320}><LineChart data={salesMonths}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis /><Tooltip /><Line type="monotone" dataKey="tons" name="Toneladas" stroke="#0f766e" /></LineChart></ResponsiveContainer></ChartPanel><ChartPanel title="Registros y clientes activos por mes" meta="Filas y COUNT DISTINCT Cod.Clte"><ResponsiveContainer width="100%" height={320}><BarChart data={salesMonths}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis /><Tooltip /><Legend /><Bar dataKey="records" name="Registros" fill="#2563a8" /><Bar dataKey="clients" name="Clientes" fill="#0f766e" /></BarChart></ResponsiveContainer></ChartPanel></div> : null}
+          {salesTab === "branches" ? <div className={styles.dashboardGrid}><ChartPanel title="Venta por sucursal" meta="SUM Importe Vendido US$">{renderSalesBar(salesBranches)}</ChartPanel><ChartPanel title="Participación por sucursal" meta="Porcentaje">{renderSalesPie(salesBranches)}</ChartPanel></div> : null}
+          {salesTab === "products" ? <div className={styles.dashboardGrid}><ChartPanel title="Top 10 productos por venta" meta="Producto + descripción">{renderSalesBar(salesProducts, "#0f766e")}</ChartPanel><ChartPanel title="Venta por clase" meta="Venta y participación">{renderSalesPie(salesClasses)}</ChartPanel><ChartPanel title="Venta por unidad" meta="SUM Importe Vendido US$">{renderSalesBar(salesGrouped(salesFilteredRows, "unit"), "#0891b2")}</ChartPanel></div> : null}
+          {salesTab === "clients" ? <div className={styles.dashboardGrid}><ChartPanel title="Top 5 mejores clientes" meta="Cliente + venta USD">{renderSalesBar(salesClients, "#475569")}</ChartPanel><ChartPanel title="Clientes activos por mes" meta="COUNT DISTINCT Cod.Clte"><ResponsiveContainer width="100%" height={300}><LineChart data={salesMonths}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="name" /><YAxis /><Tooltip /><Line type="monotone" dataKey="clients" name="Clientes" stroke="#12355b" /></LineChart></ResponsiveContainer></ChartPanel></div> : null}
+          {salesTab === "industries" ? <div className={styles.dashboardGrid}><ChartPanel title="Distribución de venta por industria" meta="Top 10">{renderSalesBar(salesIndustries, "#0891b2")}</ChartPanel><ChartPanel title="Venta por aplicación" meta="Top 10">{renderSalesBar(salesGrouped(salesFilteredRows, "application").slice(0, 10), "#0f766e")}</ChartPanel><ChartPanel title="Venta por negocio" meta="Top 10">{renderSalesBar(salesGrouped(salesFilteredRows, "business").slice(0, 10), "#2563a8")}</ChartPanel></div> : null}
+          {salesTab === "advanced" ? <div className={styles.dashboardGrid}><ChartPanel title="Matriz sucursal vs clase" meta="Venta USD"><EmptyChart>Vista de matriz pendiente de dimensiones compatibles</EmptyChart></ChartPanel><ChartPanel title="Venta por documento" meta="Cantidad de registros y venta">{renderSalesBar(salesGrouped(salesFilteredRows, "documentType"), "#2563a8")}</ChartPanel><ChartPanel title="Venta por grupo" meta="Participación comercial">{renderSalesBar(salesGrouped(salesFilteredRows, "group"), "#0f766e")}</ChartPanel></div> : null}
+          {active && !salesCompareRegions ? <section className={styles.dashboardGrid}><ChartPanel title="Frecuencia de compra · Top 10 clientes" meta="Promedio de días entre compras consecutivas · ordenado por venta"><div className={styles.frequencyChart}>{salesFrequency.length ? <div className={styles.frequencyList}>{salesFrequency.map((item) => <div className={styles.frequencyRow} key={item.name}><div><strong>{salesDisplayName(item.name)}</strong><span>{item.purchases} compras · {formatSalesUSD(item.salesTotal)} acumulado</span></div><b>{item.total.toFixed(0)} días</b></div>)}</div> : <EmptyChart>No hay clientes con más de una compra en el periodo filtrado</EmptyChart>}</div></ChartPanel></section> : null}
+          {!salesCompareRegions ? <article className={styles.panel}>
+            <div className={styles.panelHeader}><div><h2>Detalle de registros</h2><span>{salesFilteredRows.length.toLocaleString("es-PE")} filas filtradas · mostrando hasta 200</span></div></div>
+            <div className={styles.tableWrap}><table><thead><tr><th>Fecha</th><th>Sucursal</th><th>Cliente</th><th>Producto</th><th>Clase</th><th>Grupo</th><th>Negocio</th><th>Industria</th><th>Aplicación</th><th>Volumen</th><th>Toneladas</th><th>Importe S/.</th><th>Importe USD</th></tr></thead><tbody>{salesFilteredRows.slice(0, 200).map((row) => <tr key={row.id}><td>{row.date}</td><td>{row.branch}</td><td>{row.clientName}</td><td>{row.productDescription}</td><td>{salesDisplayName(row.className)}</td><td>{row.group}</td><td>{row.business}</td><td>{row.industry}</td><td>{row.application}</td><td>{row.volumeSold.toLocaleString("es-PE")}</td><td>{row.tons.toLocaleString("es-PE", { maximumFractionDigits: 3 })}</td><td>{formatSalesPEN(row.amountPEN)}</td><td>{formatSalesUSD(row.amountUSD)}</td></tr>)}</tbody></table></div>
+          </article> : null}
+        </> : null}
+      </>
+    );
+  }
+
   function expandedContent() {
     if (expandedChart === "date") {
       return renderDateChart(520);
@@ -2545,17 +2959,24 @@ export default function Home() {
         </button>
         <button
           type="button"
+          className={activeView === "sales" ? styles.topNavActive : ""}
+          onClick={() => setActiveView("sales")}
+        >
+          I3 - Análisis comercial
+        </button>
+        <button
+          type="button"
           className={activeView === "errors" ? styles.topNavActive : ""}
           onClick={() => setActiveView("errors")}
         >
-          I3 - Tasa de error
+          I4 - Tasa de error
         </button>
         <button
           type="button"
           className={activeView === "performance" ? styles.topNavActive : ""}
           onClick={() => setActiveView("performance")}
         >
-          I4 - Rendimiento operativo
+          I5 - Rendimiento operativo
         </button>
       </nav>
 
@@ -2724,30 +3145,31 @@ export default function Home() {
           {renderAgentTimeline()}
 
           <div className={styles.matrixGrid}>
-            <ChartPanel title="Evolución mensual de correos recibidos" meta="COUNT DISTINCT id_email" info="Campos: date_email e id_email. Agrupa por año-mes y cuenta correos únicos.">
+            <ChartPanel title="Evolución mensual de correos recibidos" meta="COUNT DISTINCT id_email" comparison={emailVolumeComparison} info="Campos: date_email e id_email. Agrupa por año-mes y cuenta correos únicos.">
               {renderEmailMonthlyChart()}
             </ChartPanel>
-            <ChartPanel title="Evolución de indicadores de calidad" meta="NDA vs NDS" info={`NDA = correos atendidos / recibidos. NDS = correos asignados en ≤ ${EMAIL_SLA_MINUTES} minutos / recibidos.`}>
+            <ChartPanel title="Evolución de indicadores de calidad" meta="NDA vs NDS · fechas de registro" comparison={<>{emailMonthComparison("NDA", (month) => month.nda)}{emailMonthComparison("NDS", (month) => month.nds)}</>} info={`NDA = correos con estado atendido/finalizado / correos recibidos. NDS = (fecha de registro − date_email) ≤ ${EMAIL_SLA_MINUTES} minutos / correos recibidos. Los tiempos negativos se consideran válidos; solo se excluyen los mayores a ${EMAIL_SLA_MINUTES} minutos.`}>
               {renderEmailQualityChart()}
             </ChartPanel>
-            <ChartPanel title="Evolución del TMO" meta="Tiempo medio de operación">
+            <ChartPanel title="Evolución del TMO" meta="Desde date_email hasta fecha de registro · horario 07:00–23:01" comparison={emailMonthComparison("TMO", (month) => month.tmoMinutes)} info="Campos: date_email y fecha de registro. TMO por correo = fecha de registro − date_email, contando solo el horario operativo de 07:00 a 23:01. Los correos recibidos después de las 23:00 empiezan a contar desde las 07:00 del día siguiente. El TMO mensual es el promedio de los correos atendidos con fechas válidas.">
               {renderEmailTmoChart()}
             </ChartPanel>
-            <ChartPanel title="Correos por hora de recepción" meta="Hora extraída de date_email">
+            <ChartPanel title="Correos por hora de recepción" meta="Hora extraída de date_email" comparison={emailVolumeComparison} actions={<button className={styles.chartActionButton} type="button" onClick={() => setEmailHourChronological((value) => !value)} title={emailHourChronological ? "Mostrar horas por volumen" : "Ordenar de 00:00 a 23:00"}><ArrowDownAZ size={15} aria-hidden="true" />{emailHourChronological ? "Por volumen" : "Ordenar por hora"}</button>}>
               {renderEmailHourChart()}
             </ChartPanel>
-            <ChartPanel title="Correos por tipificación" meta="tipificacion · id_email">
-              {renderMatrixBarChart(emailSummary.byTipificacion, "#2563a8")}
+            <ChartPanel title="Correos por tipificación" meta="Porcentaje · id_email" comparison={emailVolumeComparison} info="Campo: tipificacion. Cuenta id_email únicos por tipificación y calcula el porcentaje sobre el total filtrado. Se muestra en gráfico circular.">
+              {renderEmailPieChart(emailSummary.byTipificacion)}
             </ChartPanel>
-            <ChartPanel title="Correos por motivo" meta="motivo · id_email">
-              {renderMatrixBarChart(emailSummary.byMotivo, "#0f766e")}
+            <ChartPanel title="Correos por motivo" meta="Porcentaje · id_email" comparison={emailVolumeComparison} info="Campo: motivo. Cuenta id_email únicos por motivo y calcula el porcentaje sobre el total filtrado. Los registros sin motivo se excluyen del gráfico, pero permanecen en los datos originales.">
+              {renderEmailPieChart(emailSummary.byMotivo)}
             </ChartPanel>
-            <ChartPanel title="Correos por usuario" meta="usuario asignado · id_email">
+            <ChartPanel title="Correos por usuario" meta="usuario asignado · id_email" comparison={emailVolumeComparison}>
               {renderMatrixBarChart(emailSummary.byUser, "#475569")}
             </ChartPanel>
             <ChartPanel
               title="Mapa de calor I2"
               meta="Correos recibidos por día y hora"
+              comparison={emailVolumeComparison}
             >
               <HeatmapGrid
                 cells={emailHeatmap}
@@ -2762,21 +3184,17 @@ export default function Home() {
             </ChartPanel>
             <ChartPanel
               title="Promedio por dia"
-              meta={`${matrixSummary.avgByDay.length} dias`}
+              meta={`${matrixSummary.avgByDay.length} dias · clic para ver datos`}
+              info="Agrupa por fecha de date_email y muestra los tiempos promedio de asignación y resolución. Haz clic en un día para abrir las filas crudas de ese día."
             >
-              {renderMatrixTimeChart(matrixSummary.avgByDay)}
+              {renderMatrixTimeChart(matrixSummary.avgByDay, undefined, setMatrixDayDetail)}
             </ChartPanel>
             <ChartPanel
               title="Promedio por mes"
-              meta={`${matrixSummary.avgByMonth.length} meses`}
+              meta={`${matrixSummary.avgByMonth.length} meses · asignación vs resolución`}
+              info="Campos: date_email, fecha_asignacion y fecha de registro. Eje X: año-mes de date_email. Eje Y: minutos promedio. Las barras de asignación y resolución se muestran separadas."
             >
-              {renderMatrixTimeChart(matrixSummary.avgByMonth, Math.max(280, Math.min(520, matrixSummary.avgByMonth.length * 54)))}
-            </ChartPanel>
-            <ChartPanel
-              title="Tipificacion"
-              meta={`${matrixSummary.byTipificacion.length} tipos`}
-            >
-              {renderMatrixBarChart(matrixSummary.byTipificacion, "#2563a8")}
+              {renderMatrixMonthlyTimeChart(matrixSummary.avgByMonth)}
             </ChartPanel>
             <ChartPanel
               title="Estado de registro"
@@ -2784,46 +3202,32 @@ export default function Home() {
             >
               {renderMatrixBarChart(matrixSummary.byEstado, "#0f766e")}
             </ChartPanel>
+          </div>
+
+          <div className={styles.matrixUserDetailLayout}>
             <ChartPanel
               title="Usuario asignado"
               meta={`${matrixSummary.byUser.length} usuarios`}
             >
               {renderMatrixUserChart()}
             </ChartPanel>
-          </div>
-
-          <article className={styles.panel}>
-            <div className={styles.panelHeader}><div><h2>Tabla resumen del periodo</h2><span>Valores mensuales calculados con id_email único</span></div></div>
-            <div className={styles.tableWrap}>
-              <table>
-                <thead><tr><th>Indicador</th>{emailSummary.byMonth.map((month) => <th key={month.name}>{month.name}</th>)}<th>Promedio</th></tr></thead>
-                <tbody>
-                  <tr><td>Correos recibidos</td>{emailSummary.byMonth.map((month) => <td key={month.name}>{month.received.toLocaleString("es-PE")}</td>)}<td>{emailSummary.received.toLocaleString("es-PE")}</td></tr>
-                  <tr><td>NDA</td>{emailSummary.byMonth.map((month) => <td key={month.name}>{formatPercent(month.nda)}</td>)}<td>{formatPercent(emailSummary.nda)}</td></tr>
-                  <tr><td>NDS</td>{emailSummary.byMonth.map((month) => <td key={month.name}>{formatPercent(month.nds)}</td>)}<td>{formatPercent(emailSummary.nds)}</td></tr>
-                  <tr><td>TMO</td>{emailSummary.byMonth.map((month) => <td key={month.name}>{formatEmailTmo(month.tmoMinutes)}</td>)}<td>{formatEmailTmo(emailSummary.tmoMinutes)}</td></tr>
-                </tbody>
-              </table>
-            </div>
-          </article>
-
-          <article className={styles.panel}>
+            <article className={styles.panel}>
             <div className={styles.panelHeader}>
               <div>
                 <h2>Detalle matriz</h2>
                 <span>
-                  {visibleMatrixRows.length.toLocaleString("es-PE")} registros
+                  {filteredMatrixRows.length.toLocaleString("es-PE")} de {visibleMatrixRows.length.toLocaleString("es-PE")} registros
+                  {matrixUserFocus ? ` · usuario: ${matrixUserFocus}` : ""}
                   {hiddenMatrixRows ? `, mostrando ${matrixDetailRows.length.toLocaleString("es-PE")} para mantener fluidez` : ""}
                 </span>
               </div>
+              {matrixUserFocus ? <button className={styles.chartActionButton} type="button" onClick={() => setMatrixUserFocus(null)}>Mostrar todos los usuarios</button> : null}
             </div>
             <div className={styles.tableWrap}>
               <table>
                 <thead>
                   <tr>
-                    {matrixColumns.map((column) => (
-                      <th key={column}>{column}</th>
-                    ))}
+                    {matrixColumns.map((column) => <th key={column}>{column}</th>)}
                     <th>SLA a asignacion</th>
                     <th>SLA a resolucion</th>
                     <th>SLA total</th>
@@ -2843,6 +3247,22 @@ export default function Home() {
                 </tbody>
               </table>
             </div>
+            </article>
+          </div>
+
+          <article className={styles.panel}>
+            <div className={styles.panelHeader}><div><h2>Tabla resumen del periodo</h2><span>Valores mensuales con id_email único · variación contra el mes anterior</span></div></div>
+            <div className={styles.tableWrap}>
+              <table>
+                <thead><tr><th>Indicador</th>{emailSummary.byMonth.map((month) => <th key={month.name}>{month.name}</th>)}<th>Vs. mes anterior</th></tr></thead>
+                <tbody>
+                  <tr><td>Correos recibidos</td>{emailSummary.byMonth.map((month) => <td key={month.name}>{month.received.toLocaleString("es-PE")}</td>)}<td>{emailMonthDelta((month) => month.received)}</td></tr>
+                  <tr><td>NDA</td>{emailSummary.byMonth.map((month) => <td key={month.name}>{formatPercent(month.nda)}</td>)}<td>{emailMonthDelta((month) => month.nda)}</td></tr>
+                  <tr><td>NDS</td>{emailSummary.byMonth.map((month) => <td key={month.name}>{formatPercent(month.nds)}</td>)}<td>{emailMonthDelta((month) => month.nds)}</td></tr>
+                  <tr><td>TMO</td>{emailSummary.byMonth.map((month) => <td key={month.name}>{formatEmailTmo(month.tmoMinutes)}</td>)}<td>{emailMonthDelta((month) => month.tmoMinutes)}</td></tr>
+                </tbody>
+              </table>
+            </div>
           </article>
             </section>
           ) : (
@@ -2854,6 +3274,8 @@ export default function Home() {
           )}
         </>
       ) : null}
+
+      {activeView === "sales" ? renderSalesContent() : null}
 
       {activeView === "errors" ? (
         <>
@@ -3080,17 +3502,18 @@ export default function Home() {
       {activeView === "calls" && rows.length ? (
         <>
       <section className={styles.statsGrid} onClick={stopInsideClick}>
-        <StatCard icon={<Hash size={18} />} label="Llamadas recibidas" value={currentSummary.total.toLocaleString("es-PE")} />
-        <StatCard icon={<Phone size={18} />} label="Llamadas atendidas" value={currentSummary.attendedCalls.toLocaleString("es-PE")} />
-        <StatCard icon={<UserRound size={18} />} label="Nivel de atención" value={formatPercent(percentage(currentSummary.attendedCalls, currentSummary.total))} />
-        <StatCard icon={<Phone size={18} />} label="Abandono" value={formatPercent(percentage(Math.max(0, currentSummary.total - currentSummary.attendedCalls), currentSummary.total))} />
-        <StatCard icon={<Timer size={18} />} label="TMO promedio" value={formatCallDuration(serviceSummary.averageDurationSeconds)} />
+        <StatCard icon={<Hash size={18} />} label="Llamadas recibidas" value={currentSummary.total.toLocaleString("es-PE")} comparison={callMonthComparison((month) => month.received)} />
+        <StatCard icon={<Phone size={18} />} label="Llamadas atendidas" value={currentSummary.attendedCalls.toLocaleString("es-PE")} comparison={callMonthComparison((month) => month.attended)} />
+        <StatCard icon={<UserRound size={18} />} label="Nivel de atención" value={formatPercent(percentage(currentSummary.attendedCalls, currentSummary.total))} comparison={callMonthComparison((month) => percentage(month.attended, month.received))} />
+        <StatCard icon={<Phone size={18} />} label="Abandono" value={formatPercent(percentage(Math.max(0, currentSummary.total - currentSummary.attendedCalls), currentSummary.total))} comparison={callMonthComparison((month) => percentage(Math.max(0, month.received - month.attended), month.received))} />
+        <StatCard icon={<Timer size={18} />} label="TMO promedio" value={formatCallDuration(serviceSummary.averageDurationSeconds)} comparison={callMonthComparison((month) => "averageDurationSeconds" in month ? month.averageDurationSeconds : null)} />
       </section>
 
       <section className={styles.dashboardGrid}>
         <ChartPanel
           title="Llamadas por mes"
           meta={`${monthlyCallData.length} meses`}
+          comparison={callComparisonBadge("volumen", (month) => month.received)}
           onExpand={() => setExpandedChart("date")}
           onExport={() => void exportChart("date", "Llamadas por mes")}
         >
@@ -3102,6 +3525,7 @@ export default function Home() {
         <ChartPanel
           title="Llamadas recibidas por hora"
           meta={`${byHour.length} horas`}
+          comparison={callComparisonBadge("volumen", (month) => month.received)}
           onExpand={() => setExpandedChart("hour")}
           onExport={() => void exportChart("hour", "Llamadas recibidas por hora")}
         >
@@ -3113,6 +3537,7 @@ export default function Home() {
         <ChartPanel
           title="Categorías"
           meta={`${statusChartData.length} categorías`}
+          comparison={callComparisonBadge("volumen", (month) => month.received)}
           onExpand={() => setExpandedChart("status")}
           onExport={() => void exportChart("status", "Categorías")}
           info="Campo: status_name. Cuenta las llamadas por categoría. Al seleccionar una categoría, las demás permanecen visibles y atenuadas; el filtro se combina con los demás dashboards."
@@ -3123,6 +3548,7 @@ export default function Home() {
         <ChartPanel
           title="Campañas"
           meta={`${byCampaign.length} campañas`}
+          comparison={callComparisonBadge("volumen", (month) => month.received)}
           onExpand={() => setExpandedChart("campaign")}
           onExport={() => void exportChart("campaign", "Campañas")}
         >
@@ -3133,26 +3559,26 @@ export default function Home() {
       </section>
 
       <section className={`${styles.dashboardGrid} ${styles.fullWidthDashboard}`} onClick={stopInsideClick}>
-        <ChartPanel title="Mapa de calor I1" meta="Llamadas por día y hora · 07:00 a 23:00">
+        <ChartPanel title="Mapa de calor I1" meta="Llamadas por día y hora · 07:00 a 23:00" comparison={callComparisonBadge("volumen", (month) => month.received)}>
           <HeatmapGrid cells={callHeatmap} formatter={(value) => `${value.toLocaleString("es-PE")} llamadas`} />
         </ChartPanel>
       </section>
 
       <section className={styles.serviceSection} onClick={stopInsideClick}>
         <div className={styles.dashboardGrid}>
-          <ChartPanel title="Nivel de atención por mes" meta="NA: atendidas / recibidas · Meta ≥ 90%" info="Campos: length_in_sec y call_date. Llamada atendida = length_in_sec > 0. Nivel de Atención (NA) = llamadas atendidas / llamadas recibidas × 100. Meta operativa: NA ≥ 90%.">
+          <ChartPanel title="Nivel de atención por mes" meta="NA: atendidas / recibidas · Meta ≥ 90%" comparison={callComparisonBadge("NA", (month) => percentage(month.attended, month.received))} info="Campos: length_in_sec y call_date. Llamada atendida = length_in_sec > 0. Nivel de Atención (NA) = llamadas atendidas / llamadas recibidas × 100. Meta operativa: NA ≥ 90%.">
             {renderServiceQualityChart()}
           </ChartPanel>
-          <ChartPanel title="TMO por mes" meta="Tiempo medio de operación">
+          <ChartPanel title="TMO por mes" meta="Tiempo medio de operación" comparison={callComparisonBadge("TMO", (month) => "averageDurationSeconds" in month ? month.averageDurationSeconds : null)}>
             {renderServiceDurationChart()}
           </ChartPanel>
-          <ChartPanel title="Abandono por mes" meta="Recibidas menos atendidas">
+          <ChartPanel title="Abandono por mes" meta="Recibidas menos atendidas" comparison={callComparisonBadge("abandono", (month) => percentage(Math.max(0, month.received - month.attended), month.received))}>
             {renderAbandonmentChart()}
           </ChartPanel>
-          <ChartPanel title="Distribución de duración" meta="Segundos por llamada" info="Campo: length_in_sec. Agrupa las llamadas en rangos de duración para identificar concentración operativa.">
+          <ChartPanel title="Distribución de duración" meta="Segundos por llamada" comparison={callComparisonBadge("volumen", (month) => month.received)} info="Campo: length_in_sec. Agrupa las llamadas en rangos de duración para identificar concentración operativa.">
             {renderDurationDistribution()}
           </ChartPanel>
-          <ChartPanel title="Rendimiento por usuario" meta="Recibidas y atendidas" info="Campos: user y length_in_sec. Compara llamadas recibidas contra atendidas por usuario.">
+          <ChartPanel title="Rendimiento por usuario" meta="Recibidas y atendidas" comparison={callComparisonBadge("volumen", (month) => month.received)} info="Campos: user y length_in_sec. Compara llamadas recibidas contra atendidas por usuario.">
             {renderUserPerformance()}
           </ChartPanel>
           <ChartPanel title="Datos crudos filtrados" meta={`${visibleRows.length.toLocaleString("es-PE")} filas`} info="Muestra las filas originales que alimentan los gráficos, respetando todos los filtros activos.">
@@ -3181,6 +3607,28 @@ export default function Home() {
               </button>
             </div>
             {expandedContent()}
+          </section>
+        </div>
+      ) : null}
+
+      {activeView === "matrix" && matrixDayDetail ? (
+        <div className={styles.modalBackdrop} onClick={() => setMatrixDayDetail(null)} role="presentation">
+          <section className={styles.modal} onClick={stopInsideClick} role="dialog" aria-modal="true" aria-label={`Datos crudos del ${matrixDayDetail}`}>
+            <div className={styles.modalHeader}>
+              <div>
+                <h2>Datos crudos · {matrixDayDetail}</h2>
+                <span>{matrixDayDetailRows.length.toLocaleString("es-PE")} correos filtrados por date_email</span>
+              </div>
+              <button className={styles.iconButton} type="button" onClick={() => setMatrixDayDetail(null)} aria-label="Cerrar datos del día">
+                <X size={18} aria-hidden="true" />
+              </button>
+            </div>
+            <div className={styles.rawDataScroll}>
+              <table className={styles.rawDataTable}>
+                <thead><tr>{(matrixColumns.length ? matrixColumns : Object.keys(matrixDayDetailRows[0]?.raw ?? {})).map((column) => <th key={column}>{column}</th>)}</tr></thead>
+                <tbody>{matrixDayDetailRows.map((row) => <tr key={row.id}>{(matrixColumns.length ? matrixColumns : Object.keys(row.raw)).map((column) => <td key={`${row.id}-${column}`}>{row.raw[column] ?? ""}</td>)}</tr>)}</tbody>
+              </table>
+            </div>
           </section>
         </div>
       ) : null}
