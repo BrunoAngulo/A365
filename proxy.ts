@@ -6,7 +6,7 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  if (request.cookies.get("a365_access")?.value !== "1") {
+  if (request.cookies.get("a365_secure_access")?.value !== "1") {
     const accessUrl = request.nextUrl.clone();
     accessUrl.pathname = "/access";
     return NextResponse.redirect(accessUrl);
