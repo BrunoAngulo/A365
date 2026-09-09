@@ -1960,8 +1960,11 @@ export default function Home() {
 
   useEffect(() => {
     const hasAccessCookie = document.cookie.split(";").some((cookie) => cookie.trim().startsWith("a365_access=1"));
-    setAccessGranted(hasAccessCookie);
-    setAccessChecked(true);
+    const timer = window.setTimeout(() => {
+      setAccessGranted(hasAccessCookie);
+      setAccessChecked(true);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   useEffect(() => {
@@ -2948,6 +2951,7 @@ export default function Home() {
   return (
     <main className={styles.page}>
       {accessChecked && !accessGranted ? <div className={styles.accessBackdrop}><form className={styles.accessModal} onSubmit={submitAccess} autoComplete="off"><div className={styles.accessBrand}>A365</div><h2>Acceso al dashboard</h2><p>Ingresa la contraseña para continuar.</p><label htmlFor="dashboard-access-password">Contraseña</label><input id="dashboard-access-password" type="password" value={accessPassword} onChange={(event) => setAccessPassword(event.target.value)} autoFocus /><button type="submit">Ingresar</button></form></div> : null}
+      {accessChecked && accessGranted ? <div className={styles.protectedDashboard}>
       <section className={styles.header} onClick={stopInsideClick}>
         <div>
           <h1>Control operativo</h1>
@@ -3653,6 +3657,7 @@ export default function Home() {
           </section>
         </div>
       ) : null}
+      </div> : null}
     </main>
   );
 }
