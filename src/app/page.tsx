@@ -1806,6 +1806,9 @@ export default function Home() {
   const [salesTab, setSalesTab] = useState<SalesTab>("summary");
   const [salesFilters, setSalesFilters] = useState<Record<string, string>>({});
   const [salesCompareRegions, setSalesCompareRegions] = useState(false);
+  const [accessChecked, setAccessChecked] = useState(false);
+  const [accessGranted, setAccessGranted] = useState(false);
+  const [accessPassword, setAccessPassword] = useState("");
 
   const dateFilteredRows = useMemo(
     () => rows.filter((row) => (!callStartDate && !callEndDate) || (row.date !== "Sin fecha" && (!callStartDate || row.date >= callStartDate) && (!callEndDate || row.date <= callEndDate))),
@@ -1954,6 +1957,12 @@ export default function Home() {
     status: statusChartRef,
     campaign: campaignChartRef,
   };
+
+  useEffect(() => {
+    const hasAccessCookie = document.cookie.split(";").some((cookie) => cookie.trim().startsWith("a365_access=1"));
+    setAccessGranted(hasAccessCookie);
+    setAccessChecked(true);
+  }, []);
 
   useEffect(() => {
     const saved = readPersistedCalls();
@@ -2925,8 +2934,20 @@ export default function Home() {
     return null;
   }
 
+  function submitAccess(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (accessPassword !== "Palabra!Aleatoria2026#") {
+      setAccessPassword("");
+      return;
+    }
+    document.cookie = "a365_access=1; max-age=2592000; path=/; SameSite=Lax";
+    setAccessGranted(true);
+    setAccessPassword("");
+  }
+
   return (
     <main className={styles.page}>
+      {accessChecked && !accessGranted ? <div className={styles.accessBackdrop}><form className={styles.accessModal} onSubmit={submitAccess} autoComplete="off"><div className={styles.accessBrand}>A365</div><h2>Acceso al dashboard</h2><p>Ingresa la contraseña para continuar.</p><label htmlFor="dashboard-access-password">Contraseña</label><input id="dashboard-access-password" type="password" value={accessPassword} onChange={(event) => setAccessPassword(event.target.value)} autoFocus /><button type="submit">Ingresar</button></form></div> : null}
       <section className={styles.header} onClick={stopInsideClick}>
         <div>
           <h1>Control operativo</h1>

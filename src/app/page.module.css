@@ -281,7 +281,8 @@
   display: grid;
   place-items: center;
   padding: 20px;
-  background: #ffffff;
+  background: rgba(15, 39, 71, 0.46);
+  backdrop-filter: blur(3px);
 }
 
 .accessModal {
