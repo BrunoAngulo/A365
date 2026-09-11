@@ -179,7 +179,6 @@ type IncidentSummary = {
   byType: ChartPoint[];
   byBranch: ChartPoint[];
   byMonth: ChartPoint[];
-  byProceed: ChartPoint[];
 };
 
 type ClientDirectoryRow = { branch: string; customerCode: string; customerName: string; seller: string };
@@ -545,7 +544,7 @@ const incidentColumnAliases = {
   startTime: ["hora de inicio", "inicio", "start time"],
   endTime: ["hora de finalizacion", "hora de finalización", "finalizacion", "finalización", "end time"],
   email: ["correo electronico", "correo electrónico", "email"],
-  agent: ["agente", "AGENTE", "usuario", "asesor", "nombre"],
+  agent: ["agente", "AGENTE"],
   branch: ["a que sucursal pertenece el cliente", "sucursal", "plaza"],
   incidentDate: ["fecha de incidente", "fecha incidente"],
   customerCode: ["codigo de cliente", "código de cliente", "cod cliente"],
@@ -1359,7 +1358,6 @@ function buildIncidentSummary(rows: IncidentRow[]): IncidentSummary {
     byType: countIncidentsBy(rows, "inconsistencyType"),
     byBranch: countIncidentsBy(rows, "branch"),
     byMonth: pointsFromMap(monthMap, "name"),
-    byProceed: countIncidentsBy(rows, "proceeds", "name"),
   };
 }
 
@@ -3505,9 +3503,6 @@ export default function Home() {
                 </ChartPanel>
                 <ChartPanel title="Por sucursal" meta={`${incidentSummary.byBranch.length} sucursales`}>
                   {renderMatrixBarChart(incidentSummary.byBranch, "#059669")}
-                </ChartPanel>
-                <ChartPanel title="¿Procede?" meta="Clasificación PROCEDE?">
-                  {renderMatrixBarChart(incidentSummary.byProceed, "#7c3aed")}
                 </ChartPanel>
                 <ChartPanel title="Por mes" meta={`${incidentSummary.byMonth.length} meses`}>
                   {renderMatrixBarChart(incidentSummary.byMonth, "#475569")}
