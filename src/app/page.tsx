@@ -187,6 +187,8 @@ type ClientDirectoryRow = { branch: string; customerCode: string; customerName: 
 const excludedPerformanceCallAgents = new Set(["ahuaman", "vdcl", "psalas", "csalas", "derivador_sur", "derivador_am"]);
 const performanceAgentAliases = new Map([
   ["ffernadez", "ffernadez"],
+  ["ffernandez", "ffernadez"],
+  ["f fernandez", "ffernadez"],
   ["f fernadez", "ffernadez"],
   ["claura", "claura"],
   ["c laura", "claura"],
