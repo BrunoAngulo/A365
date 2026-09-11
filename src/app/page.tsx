@@ -2266,10 +2266,6 @@ export default function Home() {
             data={matrixSummary.byUser}
             layout="vertical"
             margin={{ left: 16, right: 20, top: 8, bottom: 0 }}
-            onClick={(state) => {
-              const value = chartClickValue(state as ChartClickState);
-              if (value) setMatrixUserFocus((current) => current === value ? null : value);
-            }}
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#dce5f0" />
             <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} />
