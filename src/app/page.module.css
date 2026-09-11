@@ -745,6 +745,12 @@
   height: 100%;
 }
 
+.matrixUserDetailLayout .scrollChart {
+  max-height: none;
+  overflow: visible;
+  padding-right: 0;
+}
+
 .timelineSelect {
   min-height: 36px;
   padding: 0 10px;
