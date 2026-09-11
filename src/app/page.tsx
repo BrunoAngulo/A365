@@ -1380,16 +1380,21 @@ function incrementAgent(map: Map<string, number>, agent: string, amount = 1) {
 
 function buildPerformanceSummary(callRows: MetricRow[], emailRows: MatrixRow[], errorRows: IncidentRow[]): PerformanceSummary {
   const callCounts = new Map<string, number>();
+  const attendedCallCounts = new Map<string, number>();
   const emailCounts = new Map<string, number>();
   const errorCounts = new Map<string, number>();
 
-  callRows.forEach((row) => incrementAgent(callCounts, row.user));
+  callRows.forEach((row) => {
+    incrementAgent(callCounts, row.user);
+    if (matchesAttendedDefinition(row, [])) incrementAgent(attendedCallCounts, row.user);
+  });
   emailRows.forEach((row) => incrementAgent(emailCounts, row.usuarioAsignado));
   errorRows.forEach((row) => incrementAgent(errorCounts, row.agent));
 
   const totalCalls = callRows.length;
   const totalEmails = emailRows.length;
-  const totalAttended = totalCalls + totalEmails;
+  const totalAttendedCalls = callRows.filter((row) => matchesAttendedDefinition(row, [])).length;
+  const totalAttended = totalAttendedCalls + totalEmails;
   const totalErrors = errorRows.length;
   const agents = new Set([...callCounts.keys(), ...emailCounts.keys(), ...errorCounts.keys()]);
   const byAgent = Array.from(agents)
@@ -1397,8 +1402,9 @@ function buildPerformanceSummary(callRows: MetricRow[], emailRows: MatrixRow[], 
       const calls = callCounts.get(agent) ?? 0;
       const emails = emailCounts.get(agent) ?? 0;
       const errors = errorCounts.get(agent) ?? 0;
-      const attended = calls + emails;
-      const effectiveness = percentage(attended, totalAttended);
+      const attendedCalls = attendedCallCounts.get(agent) ?? 0;
+      const attended = attendedCalls + emails;
+      const effectiveness = percentage(Math.max(0, attended - errors), totalCalls + totalEmails);
       const quality = emails ? percentage(Math.max(0, emails - errors), emails) : 0;
       const productivity = (quality * effectiveness) / 100;
 
@@ -1415,7 +1421,7 @@ function buildPerformanceSummary(callRows: MetricRow[], emailRows: MatrixRow[], 
     })
     .sort((a, b) => b.attended - a.attended || b.errors - a.errors || a.agent.localeCompare(b.agent));
 
-  const effectiveness = percentage(totalAttended, totalAttended);
+  const effectiveness = percentage(Math.max(0, totalAttended - totalErrors), totalCalls + totalEmails);
   const quality = totalEmails ? percentage(Math.max(0, totalEmails - totalErrors), totalEmails) : 0;
   const productivity = (quality * effectiveness) / 100;
 
