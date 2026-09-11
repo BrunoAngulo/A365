@@ -1321,6 +1321,11 @@ function countIncidentsBy(rows: IncidentRow[], key: keyof IncidentRow, sortBy: "
   return pointsFromMap(map, sortBy);
 }
 
+function normalizeClientCode(value: string) {
+  const normalized = value.trim().replace(/\s+/g, "");
+  return /^\d+$/.test(normalized) ? normalized.replace(/^0+(?=\d)/, "") : normalizeKey(normalized);
+}
+
 function mapClientDirectoryRows(rows: RawRow[]): ClientDirectoryRow[] {
   if (!rows.length) return [];
   const headers = Object.keys(rows[0]);
@@ -1963,9 +1968,9 @@ export default function Home() {
     timelineRows[0]?.blocks[0];
   const enrichedIncidentRows = useMemo(() => {
     if (!clientDirectory.length) return incidentRows;
-    const directory = new Map(clientDirectory.filter((item) => item.customerCode).map((item) => [normalizeKey(item.customerCode), item]));
+    const directory = new Map(clientDirectory.filter((item) => item.customerCode).map((item) => [normalizeClientCode(item.customerCode), item]));
     return incidentRows.map((row) => {
-      const match = directory.get(normalizeKey(row.customerCode));
+      const match = directory.get(normalizeClientCode(row.customerCode));
       return match ? { ...row, branch: match.branch || row.branch, customerName: match.customerName || row.customerName, agent: match.seller || row.agent } : row;
     });
   }, [clientDirectory, incidentRows]);
