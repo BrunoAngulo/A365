@@ -1398,8 +1398,9 @@ function buildPerformanceSummary(callRows: MetricRow[], emailRows: MatrixRow[], 
       const emails = emailCounts.get(agent) ?? 0;
       const errors = errorCounts.get(agent) ?? 0;
       const attended = calls + emails;
-      const productivity = percentage(attended, totalAttended);
+      const effectiveness = percentage(attended, totalAttended);
       const quality = emails ? percentage(Math.max(0, emails - errors), emails) : 0;
+      const productivity = (quality * effectiveness) / 100;
 
       return {
         agent,
@@ -1409,13 +1410,14 @@ function buildPerformanceSummary(callRows: MetricRow[], emailRows: MatrixRow[], 
         attended,
         productivity,
         quality,
-        effectiveness: (productivity * quality) / 100,
+        effectiveness,
       };
     })
     .sort((a, b) => b.attended - a.attended || b.errors - a.errors || a.agent.localeCompare(b.agent));
 
-  const productivity = percentage(totalAttended, totalAttended);
+  const effectiveness = percentage(totalAttended, totalAttended);
   const quality = totalEmails ? percentage(Math.max(0, totalEmails - totalErrors), totalEmails) : 0;
+  const productivity = (quality * effectiveness) / 100;
 
   return {
     totalCalls,
@@ -1424,7 +1426,7 @@ function buildPerformanceSummary(callRows: MetricRow[], emailRows: MatrixRow[], 
     totalErrors,
     productivity,
     quality,
-    effectiveness: (productivity * quality) / 100,
+    effectiveness,
     byAgent,
   };
 }
