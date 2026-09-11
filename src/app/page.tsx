@@ -179,6 +179,8 @@ type IncidentSummary = {
   byType: ChartPoint[];
   byBranch: ChartPoint[];
   byMonth: ChartPoint[];
+  proceedsYes: number;
+  proceedsNo: number;
 };
 
 type ClientDirectoryRow = { branch: string; customerCode: string; customerName: string; seller: string };
@@ -1348,6 +1350,8 @@ function mapClientDirectoryRows(rows: RawRow[]): ClientDirectoryRow[] {
 function buildIncidentSummary(rows: IncidentRow[]): IncidentSummary {
   const monthMap = new Map<string, number>();
   rows.forEach((row) => addToCount(monthMap, monthForGrouping(row.incidentDate)));
+  const proceedsYes = rows.filter((row) => normalizeKey(row.proceeds) === "si" || normalizeKey(row.proceeds) === "sí").length;
+  const proceedsNo = rows.filter((row) => normalizeKey(row.proceeds) === "no").length;
 
   return {
     total: rows.length,
@@ -1358,6 +1362,8 @@ function buildIncidentSummary(rows: IncidentRow[]): IncidentSummary {
     byType: countIncidentsBy(rows, "inconsistencyType"),
     byBranch: countIncidentsBy(rows, "branch"),
     byMonth: pointsFromMap(monthMap, "name"),
+    proceedsYes,
+    proceedsNo,
   };
 }
 
@@ -3492,6 +3498,8 @@ export default function Home() {
                 <StatCard icon={<Hash size={18} />} label="Tipos de incidencia" value={incidentSummary.uniqueTypes.toLocaleString("es-PE")} />
                 <StatCard icon={<CalendarDays size={18} />} label="Meses" value={incidentSummary.byMonth.length.toLocaleString("es-PE")} />
                 <StatCard icon={<FileSpreadsheet size={18} />} label="Sucursales" value={incidentSummary.uniqueBranches.toLocaleString("es-PE")} />
+                <StatCard icon={<ClipboardList size={18} />} label="PROCEDE · Sí" value={incidentSummary.proceedsYes.toLocaleString("es-PE")} />
+                <StatCard icon={<ClipboardList size={18} />} label="PROCEDE · No" value={incidentSummary.proceedsNo.toLocaleString("es-PE")} />
               </div>
 
               <div className={styles.matrixGrid}>
