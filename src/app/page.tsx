@@ -2388,10 +2388,11 @@ export default function Home() {
             />
             <YAxis type="category" dataKey="agent" tick={{ fontSize: 12 }} width={150} />
             <Tooltip
-              formatter={(value, name) => [
-                typeof value === "number" ? formatPercent(value) : value,
-                name === "productivity" ? "Productividad" : name === "quality" ? "Calidad" : "Eficiencia",
-              ]}
+              formatter={(value, name) => {
+                const key = String(name).toLowerCase();
+                const label = key.includes("product") ? "Productividad" : key.includes("quality") || key.includes("calidad") ? "Calidad" : "Eficiencia";
+                return [typeof value === "number" ? formatPercent(value) : value, label];
+              }}
               labelFormatter={(label) => `Agente: ${label}`}
             />
             <Legend />
