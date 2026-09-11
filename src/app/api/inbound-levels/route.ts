@@ -31,33 +31,39 @@ export async function POST(request: Request) {
   const rows = cumulative.map((item, index) => ({ range: index === 0 ? "0-5s" : item.range === ">30s" ? ">30s" : `${Number(cumulative[index - 1]?.range?.replace(/\D/g, "") || 0)}-${Number(item.range?.replace(/\D/g, "") || 0)}s`, count: index === 0 ? Number(item.count ?? 0) : item.range === ">30s" ? Math.max(0, total - Number(cumulative[index - 1]?.count ?? 0)) : Math.max(0, Number(item.count ?? 0) - Number(cumulative[index - 1]?.count ?? 0)) })).map((item) => ({ ...item, percentage: total ? (item.count / total) * 100 : 0 }));
   const daily = (payload.data?.resumen ?? []).map((item) => ({ fecha: item.fecha ?? "", recibidas: Number(item.llamadasRecibidas ?? 0), horario: Number(item.llamadasHorario ?? 0), atendidas: Number(item.atendidas ?? 0), abandonadas: Number(item.abandonadas ?? 0), nivelAtencion: Number(item.nivelAtencion ?? 0), nivelAbandono: Number(item.nivelAbandono ?? 0), promedioEspera: Number(item.promedioEspera ?? 0), asesores: Number(item.asesores ?? 0), atendidasMenos20: 0 }));
 
-  // El detalle es diario y contiene queueSeconds. Se consulta cada fecha del
-  // rango para contar llamadas atendidas con espera estrictamente menor a 20 s.
+  // nivelesServicio es acumulado para todo el rango. Consultamos una vez por
+  // mes para que la serie mensual conserve el conteo correcto de <20 segundos.
   const start = new Date(`${body.startDate}T00:00:00`);
   const end = new Date(`${body.endDate}T00:00:00`);
-  const dates: string[] = [];
-  for (const cursor = new Date(start); cursor <= end && dates.length <= 366; cursor.setDate(cursor.getDate() + 1)) {
-    dates.push(cursor.toISOString().slice(0, 10));
+  const months: Array<{ key: string; start: string; end: string }> = [];
+  for (const cursor = new Date(start.getFullYear(), start.getMonth(), 1); cursor <= end; cursor.setMonth(cursor.getMonth() + 1)) {
+    const monthStart = new Date(Math.max(start.getTime(), cursor.getTime()));
+    const monthEnd = new Date(Math.min(end.getTime(), new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).getTime()));
+    months.push({ key: cursor.toISOString().slice(0, 7), start: monthStart.toISOString().slice(0, 10), end: monthEnd.toISOString().slice(0, 10) });
   }
-  const detailResults = await Promise.all(dates.map(async (date) => {
-    const detailUrl = new URL("https://tmkreport15.a365.com.pe/api/inbound-metrics/call-detail");
-    detailUrl.searchParams.set("connectionId", "a0bb59bd-b685-4ad5-8129-03781adb7d6b");
-    detailUrl.searchParams.set("date", date);
-    detailUrl.searchParams.set("filterType", "atendidas");
-    queues.forEach((queue) => detailUrl.searchParams.append("queues[]", queue));
+  const under20ByMonth = new Map<string, number>();
+  await Promise.all(months.map(async ({ key, start: monthStart, end: monthEnd }) => {
+    const monthUrl = new URL("https://tmkreport15.a365.com.pe/api/inbound-metrics");
+    monthUrl.searchParams.set("connectionId", "a0bb59bd-b685-4ad5-8129-03781adb7d6b");
+    monthUrl.searchParams.set("campaignId", "LINDESAC");
+    monthUrl.searchParams.set("startDate", monthStart);
+    monthUrl.searchParams.set("endDate", monthEnd);
+    queues.forEach((queue) => monthUrl.searchParams.append("queues[]", queue));
     try {
-      const detailResponse = await fetch(detailUrl, { headers, cache: "no-store" });
-      if (!detailResponse.ok) return { date, count: 0 };
-      const text = await detailResponse.text();
-      if (!text.trim()) return { date, count: 0 };
-      const detailPayload = JSON.parse(text) as { data?: { calls?: Array<{ queueSeconds?: number }> } };
-      const calls = detailPayload.data?.calls ?? [];
-      return { date, count: calls.filter((call) => Number.isFinite(Number(call.queueSeconds)) && Number(call.queueSeconds) < 20).length };
+      const monthResponse = await fetch(monthUrl, { headers, cache: "no-store" });
+      if (!monthResponse.ok) return;
+      const text = await monthResponse.text();
+      if (!text.trim()) return;
+      const monthPayload = JSON.parse(text) as { data?: { nivelesServicio?: Array<{ range?: string; count?: number }> } };
+      const level = monthPayload.data?.nivelesServicio?.find((item) => String(item.range).replace(/\s/g, "").toLowerCase() === "<20s");
+      if (level) under20ByMonth.set(key, Number(level.count ?? 0));
     } catch {
-      return { date, count: 0 };
+      // El resto de métricas sigue disponible aunque un mes no responda.
     }
   }));
-  const under20ByDate = new Map(detailResults.map((item) => [item.date, item.count]));
-  daily.forEach((item) => { item.atendidasMenos20 = under20ByDate.get(item.fecha.slice(0, 10)) ?? 0; });
+  daily.forEach((item, index) => {
+    const month = item.fecha.slice(0, 7);
+    item.atendidasMenos20 = index === daily.findIndex((candidate) => candidate.fecha.slice(0, 7) === month) ? under20ByMonth.get(month) ?? 0 : 0;
+  });
   return NextResponse.json({ rows, daily });
 }
