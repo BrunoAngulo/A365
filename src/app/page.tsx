@@ -2373,7 +2373,7 @@ export default function Home() {
 
   function renderPerformanceChart() {
     return performanceSummary.byAgent.length ? (
-      <div className={styles.scrollChart}>
+      <div className={`${styles.scrollChart} ${styles.performanceChart}`}>
         <ResponsiveContainer width="100%" height={performanceChartHeight}>
           <BarChart
             data={performanceSummary.byAgent}

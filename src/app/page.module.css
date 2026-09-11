@@ -2039,6 +2039,34 @@
 
 }
 
+.performanceChart {
+  max-height: none;
+  padding: 14px 12px 10px;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #f8fbff 0%, #f5f3ff 100%);
+  overflow: visible;
+}
+
+.performanceChart :global(.recharts-cartesian-axis-tick-value) {
+  fill: #475569;
+  font-weight: 600;
+}
+
+.performanceChart :global(.recharts-legend-item-text) {
+  color: #334155 !important;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.performanceChart :global(.recharts-bar-rectangle) {
+  transition: opacity 160ms ease, filter 160ms ease;
+}
+
+.performanceChart :global(.recharts-bar-rectangle:hover) {
+  filter: brightness(1.08) drop-shadow(0 4px 6px rgba(37, 99, 235, .18));
+}
+
 .detailIndicators {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
