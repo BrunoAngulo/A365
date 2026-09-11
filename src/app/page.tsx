@@ -1924,7 +1924,7 @@ export default function Home() {
   );
   const matrixDetailRows = useMemo(() => filteredMatrixRows.slice(0, detailRowLimit), [filteredMatrixRows]);
   const matrixTipificacionIndicators = useMemo(
-    () => countMatrixBy(filteredMatrixRows, "tipificacion").filter((point) => point.name !== "Sin dato").slice(0, 6),
+    () => countMatrixBy(filteredMatrixRows, "tipificacion").filter((point) => point.name !== "Sin dato"),
     [filteredMatrixRows],
   );
   const hiddenMatrixRows = Math.max(0, filteredMatrixRows.length - matrixDetailRows.length);
@@ -3315,11 +3315,10 @@ export default function Home() {
               </div>
               {matrixUserFocus ? <button className={styles.chartActionButton} type="button" onClick={() => setMatrixUserFocus(null)}>Mostrar todos los usuarios</button> : null}
             </div>
-            <div className={styles.detailIndicators} aria-label="Indicadores de tipificaciones">
-              <div className={styles.detailIndicator}><span>Tickets visibles</span><strong>{filteredMatrixRows.length.toLocaleString("es-PE")}</strong></div>
-              <div className={styles.detailIndicator}><span>Tipificaciones</span><strong>{countMatrixBy(filteredMatrixRows, "tipificacion").filter((point) => point.name !== "Sin dato").length.toLocaleString("es-PE")}</strong></div>
+            {matrixTipificacionIndicators.length ? <div className={styles.detailIndicators} aria-label="Tipificaciones realizadas">
               {matrixTipificacionIndicators.map((point) => <div className={styles.detailIndicator} key={point.name}><span title={point.name}>{point.name}</span><strong>{point.total.toLocaleString("es-PE")}</strong></div>)}
             </div>
+              : null}
             <div className={styles.tableWrap}>
               <table>
                 <thead>
