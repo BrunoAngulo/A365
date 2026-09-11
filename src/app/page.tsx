@@ -42,7 +42,7 @@ import styles from "./page.module.css";
 
 type RawRow = Record<string, unknown>;
 type ApiLevelRow = { range: string; count: number; percentage: number };
-type ApiDailyRow = { fecha: string; recibidas: number; horario: number; atendidas: number; abandonadas: number; nivelAtencion: number; nivelAbandono: number; promedioEspera: number; asesores: number };
+type ApiDailyRow = { fecha: string; recibidas: number; horario: number; atendidas: number; abandonadas: number; nivelAtencion: number; nivelAbandono: number; promedioEspera: number; asesores: number; atendidasMenos20?: number };
 
 declare global {
   interface Window {
@@ -1850,8 +1850,9 @@ export default function Home() {
     const attendedByMonth = new Map<string, number>();
     visibleRows.forEach((row) => { const month = row.date.slice(0, 7); if (/^\d{4}-\d{2}$/.test(month)) attendedByMonth.set(month, (attendedByMonth.get(month) ?? 0) + 1); });
     const abandonedByMonth = new Map<string, number>();
-    apiDailyRows.forEach((row) => { const month = row.fecha.slice(0, 7); if (/^\d{4}-\d{2}$/.test(month)) abandonedByMonth.set(month, (abandonedByMonth.get(month) ?? 0) + row.abandonadas); });
-    return Array.from(new Set([...attendedByMonth.keys(), ...abandonedByMonth.keys()])).sort().map((name) => { const attended = attendedByMonth.get(name) ?? 0; const abandoned = abandonedByMonth.get(name) ?? 0; return { name, received: attended + abandoned, attended, abandoned }; });
+    const under20ByMonth = new Map<string, number>();
+    apiDailyRows.forEach((row) => { const month = row.fecha.slice(0, 7); if (/^\d{4}-\d{2}$/.test(month)) { abandonedByMonth.set(month, (abandonedByMonth.get(month) ?? 0) + row.abandonadas); under20ByMonth.set(month, (under20ByMonth.get(month) ?? 0) + (row.atendidasMenos20 ?? 0)); } });
+    return Array.from(new Set([...attendedByMonth.keys(), ...abandonedByMonth.keys()])).sort().map((name) => { const attended = attendedByMonth.get(name) ?? 0; const abandoned = abandonedByMonth.get(name) ?? 0; return { name, received: attended + abandoned, attended, abandoned, under20: under20ByMonth.get(name) ?? 0 }; });
   }, [apiDailyRows, monthlyCallData, visibleRows]);
   const serviceSummary = useMemo(() => buildServiceSummary(visibleRows, selectedStatusNames), [selectedStatusNames, visibleRows]);
   const callMonthComparison = (valueFor: (month: MonthlyCallPoint | ServiceMonthlyPoint) => number | null) => {
@@ -2633,6 +2634,9 @@ export default function Home() {
             <Bar isAnimationActive={false} dataKey="attended" name="Llamadas atendidas" fill="#059669" radius={[4, 4, 0, 0]}>
               {combinedMonthlyCallData.map((entry) => <Cell key={`attended-${entry.name}`} fill="#059669" opacity={isDimmed("month", entry.name) ? 0.2 : 1} />)}
             </Bar>
+            {apiDailyRows.length ? <Bar isAnimationActive={false} dataKey="under20" name="<20s" fill="#7c3aed" radius={[4, 4, 0, 0]}>
+              {combinedMonthlyCallData.map((entry) => <Cell key={`under20-${entry.name}`} fill="#7c3aed" opacity={isDimmed("month", entry.name) ? 0.2 : 1} />)}
+            </Bar> : null}
           </BarChart>
         </ResponsiveContainer>
       </div>
