@@ -3493,13 +3493,13 @@ export default function Home() {
               </div>
 
               <div className={styles.statsGrid}>
-                <StatCard icon={<ClipboardList size={18} />} label="Desvíos e incidencias" value={incidentSummary.total.toLocaleString("es-PE")} />
+                <StatCard icon={<ClipboardList size={18} />} label="Incidencias" value={incidentSummary.total.toLocaleString("es-PE")} />
                 <StatCard icon={<UserRound size={18} />} label="Agentes involucrados" value={incidentSummary.uniqueAgents.toLocaleString("es-PE")} />
                 <StatCard icon={<Hash size={18} />} label="Tipos de incidencia" value={incidentSummary.uniqueTypes.toLocaleString("es-PE")} />
                 <StatCard icon={<CalendarDays size={18} />} label="Meses" value={incidentSummary.byMonth.length.toLocaleString("es-PE")} />
                 <StatCard icon={<FileSpreadsheet size={18} />} label="Sucursales" value={incidentSummary.uniqueBranches.toLocaleString("es-PE")} />
-                <StatCard icon={<ClipboardList size={18} />} label="PROCEDE · Sí" value={incidentSummary.proceedsYes.toLocaleString("es-PE")} />
-                <StatCard icon={<ClipboardList size={18} />} label="PROCEDE · No" value={incidentSummary.proceedsNo.toLocaleString("es-PE")} />
+                <StatCard icon={<ClipboardList size={18} />} label="Desvíos" value={incidentSummary.proceedsYes.toLocaleString("es-PE")} />
+                <StatCard icon={<ClipboardList size={18} />} label="Refutados" value={incidentSummary.proceedsNo.toLocaleString("es-PE")} />
               </div>
 
               <div className={styles.matrixGrid}>
