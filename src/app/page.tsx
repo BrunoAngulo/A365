@@ -166,6 +166,7 @@ type IncidentRow = {
   subject: string;
   detail: string;
   impact: string;
+  proceeds: string;
   raw: Record<string, string>;
 };
 
@@ -178,6 +179,7 @@ type IncidentSummary = {
   byType: ChartPoint[];
   byBranch: ChartPoint[];
   byMonth: ChartPoint[];
+  byProceed: ChartPoint[];
 };
 
 type ClientDirectoryRow = { branch: string; customerCode: string; customerName: string; seller: string };
@@ -543,7 +545,7 @@ const incidentColumnAliases = {
   startTime: ["hora de inicio", "inicio", "start time"],
   endTime: ["hora de finalizacion", "hora de finalización", "finalizacion", "finalización", "end time"],
   email: ["correo electronico", "correo electrónico", "email"],
-  agent: ["nombre", "agente", "usuario", "asesor"],
+  agent: ["agente", "AGENTE", "usuario", "asesor", "nombre"],
   branch: ["a que sucursal pertenece el cliente", "sucursal", "plaza"],
   incidentDate: ["fecha de incidente", "fecha incidente"],
   customerCode: ["codigo de cliente", "código de cliente", "cod cliente"],
@@ -553,6 +555,7 @@ const incidentColumnAliases = {
   subject: ["asunto del correo", "asunto"],
   detail: ["detalle de la incidencia", "breve explicacion", "breve explicación", "detalle"],
   impact: ["impacto"],
+  proceeds: ["procede", "procede?"],
 };
 
 function normalizeKey(value: string) {
@@ -1291,6 +1294,7 @@ function mapIncidentRows(rows: RawRow[]) {
     subject: findColumn(headers, incidentColumnAliases.subject),
     detail: findColumn(headers, incidentColumnAliases.detail),
     impact: findColumn(headers, incidentColumnAliases.impact),
+    proceeds: findColumn(headers, incidentColumnAliases.proceeds),
   };
 
   return rows.map((row, index) => ({
@@ -1308,6 +1312,7 @@ function mapIncidentRows(rows: RawRow[]) {
     subject: valueAsText(columns.subject ? row[columns.subject] : "") || "Sin asunto",
     detail: valueAsText(columns.detail ? row[columns.detail] : "") || "Sin detalle",
     impact: valueAsText(columns.impact ? row[columns.impact] : "") || "Sin impacto",
+    proceeds: valueAsText(columns.proceeds ? row[columns.proceeds] : "") || "Sin dato",
     raw: headers.reduce<Record<string, string>>((record, header) => {
       record[header] = valueAsText(row[header]);
       return record;
@@ -1354,6 +1359,7 @@ function buildIncidentSummary(rows: IncidentRow[]): IncidentSummary {
     byType: countIncidentsBy(rows, "inconsistencyType"),
     byBranch: countIncidentsBy(rows, "branch"),
     byMonth: pointsFromMap(monthMap, "name"),
+    byProceed: countIncidentsBy(rows, "proceeds", "name"),
   };
 }
 
@@ -1971,7 +1977,9 @@ export default function Home() {
     const directory = new Map(clientDirectory.filter((item) => item.customerCode).map((item) => [normalizeClientCode(item.customerCode), item]));
     return incidentRows.map((row) => {
       const match = directory.get(normalizeClientCode(row.customerCode));
-      return match ? { ...row, branch: match.branch || row.branch, customerName: match.customerName || row.customerName, agent: match.seller || row.agent } : row;
+      // El agente operativo viene de DATA DD (columna AGENTE). El maestro
+      // complementa únicamente sucursal y razón social.
+      return match ? { ...row, branch: match.branch || row.branch, customerName: match.customerName || row.customerName } : row;
     });
   }, [clientDirectory, incidentRows]);
   const incidentSummary = useMemo(() => buildIncidentSummary(enrichedIncidentRows), [enrichedIncidentRows]);
@@ -3109,7 +3117,7 @@ export default function Home() {
           className={activeView === "errors" ? styles.topNavActive : ""}
           onClick={() => setActiveView("errors")}
         >
-          I4 - Tasa de error
+          I4 - Desvíos e incidencias
         </button>
         <button
           type="button"
@@ -3429,8 +3437,8 @@ export default function Home() {
 
           <section className={styles.reportPanel} onClick={stopInsideClick}>
             <div>
-              <h2>Tasa de error</h2>
-              <span>Carga el Excel de incidencias para cuantificar errores por agente y por tipo.</span>
+              <h2>Desvíos e incidencias</h2>
+              <span>Carga el Excel de incidencias para cuantificar desvíos por agente, sucursal y tipo.</span>
             </div>
             <div
               className={styles.inlineUpload}
@@ -3473,17 +3481,17 @@ export default function Home() {
             <section className={styles.matrixSection} onClick={stopInsideClick}>
               <div className={styles.matrixHeader}>
                 <div>
-                  <span className={styles.eyebrow}>Tasa de error</span>
-                  <h2>Errores levantados</h2>
+                  <span className={styles.eyebrow}>Desvíos e incidencias</span>
+                  <h2>Desvíos registrados</h2>
                   <p>Resumen desde la hoja BASE del registro de incidencias</p>
                 </div>
-                <strong>{incidentRows.length.toLocaleString("es-PE")} errores</strong>
+                <strong>{incidentRows.length.toLocaleString("es-PE")} incidencias</strong>
               </div>
 
               <div className={styles.statsGrid}>
-                <StatCard icon={<ClipboardList size={18} />} label="Errores" value={incidentSummary.total.toLocaleString("es-PE")} />
-                <StatCard icon={<UserRound size={18} />} label="Agentes con error" value={incidentSummary.uniqueAgents.toLocaleString("es-PE")} />
-                <StatCard icon={<Hash size={18} />} label="Tipos de error" value={incidentSummary.uniqueTypes.toLocaleString("es-PE")} />
+                <StatCard icon={<ClipboardList size={18} />} label="Desvíos e incidencias" value={incidentSummary.total.toLocaleString("es-PE")} />
+                <StatCard icon={<UserRound size={18} />} label="Agentes involucrados" value={incidentSummary.uniqueAgents.toLocaleString("es-PE")} />
+                <StatCard icon={<Hash size={18} />} label="Tipos de incidencia" value={incidentSummary.uniqueTypes.toLocaleString("es-PE")} />
                 <StatCard icon={<CalendarDays size={18} />} label="Meses" value={incidentSummary.byMonth.length.toLocaleString("es-PE")} />
                 <StatCard icon={<FileSpreadsheet size={18} />} label="Sucursales" value={incidentSummary.uniqueBranches.toLocaleString("es-PE")} />
               </div>
@@ -3497,6 +3505,9 @@ export default function Home() {
                 </ChartPanel>
                 <ChartPanel title="Por sucursal" meta={`${incidentSummary.byBranch.length} sucursales`}>
                   {renderMatrixBarChart(incidentSummary.byBranch, "#059669")}
+                </ChartPanel>
+                <ChartPanel title="¿Procede?" meta="Clasificación PROCEDE?">
+                  {renderMatrixBarChart(incidentSummary.byProceed, "#7c3aed")}
                 </ChartPanel>
                 <ChartPanel title="Por mes" meta={`${incidentSummary.byMonth.length} meses`}>
                   {renderMatrixBarChart(incidentSummary.byMonth, "#475569")}
@@ -3538,8 +3549,8 @@ export default function Home() {
           ) : (
             <section className={styles.emptyState} onClick={stopInsideClick}>
               <ClipboardList size={22} aria-hidden="true" />
-              <strong>Tasa de error lista</strong>
-              <span>Carga el archivo Registro de Incidencias para ver errores por agente y tipo.</span>
+              <strong>Desvíos e incidencias listo</strong>
+              <span>Carga el archivo Registro de Incidencias para ver desvíos por agente, sucursal y tipo.</span>
             </section>
           )}
         </>
