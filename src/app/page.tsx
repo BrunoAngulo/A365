@@ -2386,14 +2386,14 @@ export default function Home() {
             <Tooltip
               formatter={(value, name) => [
                 typeof value === "number" ? formatPercent(value) : value,
-                name === "productivity" ? "Productividad" : name === "quality" ? "Calidad" : "Efectividad",
+                name === "productivity" ? "Productividad" : name === "quality" ? "Calidad" : "Eficiencia",
               ]}
               labelFormatter={(label) => `Agente: ${label}`}
             />
             <Legend />
             <Bar dataKey="productivity" name="Productividad" fill="#2563eb" radius={[0, 4, 4, 0]} />
             <Bar dataKey="quality" name="Calidad" fill="#059669" radius={[0, 4, 4, 0]} />
-            <Bar dataKey="effectiveness" name="Efectividad" fill="#475569" radius={[0, 4, 4, 0]} />
+            <Bar dataKey="effectiveness" name="Eficiencia" fill="#475569" radius={[0, 4, 4, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -3577,7 +3577,7 @@ export default function Home() {
           <div className={styles.matrixHeader}>
             <div>
               <span className={styles.eyebrow}>I4 - Rendimiento operativo</span>
-              <h2>Productividad, calidad y efectividad</h2>
+              <h2>Productividad, calidad y eficiencia</h2>
               <p>Calculado con llamadas inbound, correos matriz y errores levantados.</p>
             </div>
             <strong>{performanceSummary.byAgent.length.toLocaleString("es-PE")} agentes</strong>
@@ -3589,13 +3589,13 @@ export default function Home() {
             <StatCard icon={<ClipboardList size={18} />} label="Errores" value={performanceSummary.totalErrors.toLocaleString("es-PE")} />
             <StatCard icon={<Hash size={18} />} label="Productividad" value={formatPercent(performanceSummary.productivity)} />
             <StatCard icon={<Timer size={18} />} label="Calidad" value={formatPercent(performanceSummary.quality)} />
-            <StatCard icon={<UserRound size={18} />} label="Efectividad" value={formatPercent(performanceSummary.effectiveness)} />
+            <StatCard icon={<UserRound size={18} />} label="Eficiencia" value={formatPercent(performanceSummary.effectiveness)} />
           </div>
 
           <div className={styles.matrixGrid}>
             <ChartPanel
               title="Indicadores por agente"
-              meta="Productividad, calidad y efectividad"
+              meta="Productividad, calidad y eficiencia"
             >
               {renderPerformanceChart()}
             </ChartPanel>
@@ -3615,7 +3615,7 @@ export default function Home() {
             <div className={styles.panelHeader}>
               <div>
                 <h2>Detalle por agente</h2>
-                <span>Llamadas + correos, errores, calidad y efectividad</span>
+                <span>Llamadas + correos, incidencias, calidad y eficiencia</span>
               </div>
             </div>
             <div className={styles.tableWrap}>
@@ -3629,7 +3629,7 @@ export default function Home() {
                     <th>Errores</th>
                     <th>Productividad</th>
                     <th>Calidad</th>
-                    <th>Efectividad</th>
+                    <th>Eficiencia</th>
                   </tr>
                 </thead>
                 <tbody>
