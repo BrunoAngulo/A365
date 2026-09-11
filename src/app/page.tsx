@@ -1321,9 +1321,16 @@ function mapIncidentRows(rows: RawRow[]) {
 }
 
 function countIncidentsBy(rows: IncidentRow[], key: keyof IncidentRow, sortBy: "name" | "total" = "total") {
-  const map = new Map<string, number>();
-  rows.forEach((row) => addToCount(map, String(row[key] || "Sin dato")));
-  return pointsFromMap(map, sortBy);
+  const groups = new Map<string, ChartPoint>();
+  rows.forEach((row) => {
+    const original = String(row[key] || "Sin dato").trim() || "Sin dato";
+    const normalized = normalizeKey(original) || "sin dato";
+    const current = groups.get(normalized);
+    if (current) current.total += 1;
+    else groups.set(normalized, { name: original.toLocaleUpperCase("es-PE"), total: 1 });
+  });
+  const points = Array.from(groups.values());
+  return sortBy === "name" ? points.sort((a, b) => a.name.localeCompare(b.name)) : points.sort((a, b) => b.total - a.total);
 }
 
 function normalizeClientCode(value: string) {
