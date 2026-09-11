@@ -2800,10 +2800,13 @@ export default function Home() {
   }
 
   function renderAbandonmentChart() {
-    return serviceSummary.byMonth.length ? (
+    // Cuando la API está cargada, usamos la misma serie mensual que alimenta
+    // el KPI: abandono = llamadas recibidas - llamadas atendidas.
+    const monthlyData = combinedMonthlyCallData;
+    return monthlyData.length ? (
       <div className={styles.chartShell}>
         <ResponsiveContainer width="100%" height={300}>
-          <BarChart data={serviceSummary.byMonth} margin={{ left: 0, right: 16, top: 8, bottom: 0 }}>
+          <BarChart data={monthlyData} margin={{ left: 0, right: 16, top: 8, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#dce5f0" />
             <XAxis dataKey="name" tick={{ fontSize: 12 }} />
             <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
