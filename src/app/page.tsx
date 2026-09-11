@@ -1421,9 +1421,7 @@ function buildPerformanceSummary(callRows: MetricRow[], emailRows: MatrixRow[], 
       const attended = attendedCalls + emails;
       const quality = emails ? 100 - percentage(errors, emails) : 0;
       const deviationRate = percentage(errors, emails);
-      const callRate = percentage(attendedCalls, calls);
-      const emailRate = percentage(emails, emails);
-      const productivity = (callRate + emailRate) / 2;
+      const productivity = percentage(attended, calls + emails);
       const efficiency = (productivity * quality) / 100;
 
       return {
@@ -1441,9 +1439,7 @@ function buildPerformanceSummary(callRows: MetricRow[], emailRows: MatrixRow[], 
     .sort((a, b) => b.attended - a.attended || b.errors - a.errors || a.agent.localeCompare(b.agent));
 
   const quality = totalEmails ? 100 - percentage(totalErrors, totalEmails) : 0;
-  const callRate = percentage(totalAttendedCalls, totalCalls);
-  const emailRate = percentage(totalEmails, totalEmails);
-  const productivity = (callRate + emailRate) / 2;
+  const productivity = percentage(totalAttended, totalCalls + totalEmails);
   const effectiveness = (productivity * quality) / 100;
 
   return {
