@@ -3127,7 +3127,7 @@ export default function Home() {
           className={activeView === "errors" ? styles.topNavActive : ""}
           onClick={() => setActiveView("errors")}
         >
-          I4 - Desvíos e incidencias
+          I4 - Tasa de error
         </button>
         <button
           type="button"
