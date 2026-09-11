@@ -1406,7 +1406,9 @@ function buildPerformanceSummary(callRows: MetricRow[], emailRows: MatrixRow[], 
       const attended = attendedCalls + emails;
       const effectiveness = percentage(Math.max(0, attended - errors), totalCalls + totalEmails);
       const quality = emails ? percentage(Math.max(0, emails - errors), emails) : 0;
-      const productivity = (quality * effectiveness) / 100;
+      const callRate = percentage(attendedCalls, calls);
+      const emailRate = percentage(emails, emails);
+      const productivity = (callRate + emailRate) / 2;
 
       return {
         agent,
@@ -1423,7 +1425,9 @@ function buildPerformanceSummary(callRows: MetricRow[], emailRows: MatrixRow[], 
 
   const effectiveness = percentage(Math.max(0, totalAttended - totalErrors), totalCalls + totalEmails);
   const quality = totalEmails ? percentage(Math.max(0, totalEmails - totalErrors), totalEmails) : 0;
-  const productivity = (quality * effectiveness) / 100;
+  const callRate = percentage(totalAttendedCalls, totalCalls);
+  const emailRate = percentage(totalEmails, totalEmails);
+  const productivity = (callRate + emailRate) / 2;
 
   return {
     totalCalls,
