@@ -736,9 +736,13 @@
 .matrixUserDetailLayout {
   display: grid;
   grid-template-columns: minmax(0, 3fr) minmax(0, 7fr);
-  align-items: start;
+  align-items: stretch;
   gap: 18px;
   margin-bottom: 18px;
+}
+
+.matrixUserDetailLayout > .panel {
+  height: 100%;
 }
 
 .timelineSelect {
