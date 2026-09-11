@@ -2029,6 +2029,39 @@
 
 }
 
+.detailIndicators {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
+.detailIndicator {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+  background: #f8fbff;
+}
+
+.detailIndicator span {
+  display: block;
+  overflow: hidden;
+  margin-bottom: 4px;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.detailIndicator strong {
+  color: #1d4ed8;
+  font-size: 20px;
+  line-height: 1;
+}
+
 /* Shared visual system for all five indicators. */
 .page {
   padding: 28px clamp(16px, 3vw, 48px) 48px;
