@@ -2374,6 +2374,11 @@ export default function Home() {
   function renderPerformanceChart() {
     return performanceSummary.byAgent.length ? (
       <div className={`${styles.scrollChart} ${styles.performanceChart}`}>
+        <div className={styles.performanceLegend} aria-label="Indicadores combinados">
+          <span><i className={styles.performanceLegendProductivity} />Productividad</span>
+          <span><i className={styles.performanceLegendQuality} />Calidad</span>
+          <span><i className={styles.performanceLegendEfficiency} />Eficiencia</span>
+        </div>
         <ResponsiveContainer width="100%" height={performanceChartHeight}>
           <BarChart
             data={performanceSummary.byAgent}
@@ -2398,7 +2403,7 @@ export default function Home() {
             <Legend />
             <Bar dataKey="productivity" name="Productividad" fill="#2563eb" radius={[0, 4, 4, 0]} />
             <Bar dataKey="quality" name="Calidad" fill="#059669" radius={[0, 4, 4, 0]} />
-            <Bar dataKey="effectiveness" name="Eficiencia" fill="#475569" radius={[0, 4, 4, 0]} />
+            <Bar dataKey="effectiveness" name="Eficiencia" fill="#7c3aed" radius={[0, 4, 4, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>

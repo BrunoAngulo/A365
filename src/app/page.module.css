@@ -2048,6 +2048,22 @@
   overflow: visible;
 }
 
+.performanceLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin: 0 0 10px 8px;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.performanceLegend span { display: inline-flex; align-items: center; gap: 6px; }
+.performanceLegend i { width: 10px; height: 10px; border-radius: 3px; }
+.performanceLegendProductivity { background: #2563eb; }
+.performanceLegendQuality { background: #059669; }
+.performanceLegendEfficiency { background: #7c3aed; }
+
 .performanceChart :global(.recharts-cartesian-axis-tick-value) {
   fill: #475569;
   font-weight: 600;
