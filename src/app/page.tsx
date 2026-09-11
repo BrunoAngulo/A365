@@ -184,6 +184,8 @@ type IncidentSummary = {
 
 type ClientDirectoryRow = { branch: string; customerCode: string; customerName: string; seller: string };
 
+const excludedPerformanceCallAgents = new Set(["ahuaman", "vdcl", "psalas", "csalas", "derivador_sur", "derivador_am"]);
+
 type AgentIndicatorRow = {
   agent: string;
   calls: number;
@@ -1379,21 +1381,22 @@ function incrementAgent(map: Map<string, number>, agent: string, amount = 1) {
 }
 
 function buildPerformanceSummary(callRows: MetricRow[], emailRows: MatrixRow[], errorRows: IncidentRow[]): PerformanceSummary {
+  const includedCallRows = callRows.filter((row) => !excludedPerformanceCallAgents.has(normalizeKey(row.user).replace(/\s+/g, "_")));
   const callCounts = new Map<string, number>();
   const attendedCallCounts = new Map<string, number>();
   const emailCounts = new Map<string, number>();
   const errorCounts = new Map<string, number>();
 
-  callRows.forEach((row) => {
+  includedCallRows.forEach((row) => {
     incrementAgent(callCounts, row.user);
     if (matchesAttendedDefinition(row, [])) incrementAgent(attendedCallCounts, row.user);
   });
   emailRows.forEach((row) => incrementAgent(emailCounts, row.usuarioAsignado));
   errorRows.forEach((row) => incrementAgent(errorCounts, row.agent));
 
-  const totalCalls = callRows.length;
+  const totalCalls = includedCallRows.length;
   const totalEmails = emailRows.length;
-  const totalAttendedCalls = callRows.filter((row) => matchesAttendedDefinition(row, [])).length;
+  const totalAttendedCalls = includedCallRows.filter((row) => matchesAttendedDefinition(row, [])).length;
   const totalAttended = totalAttendedCalls + totalEmails;
   const totalErrors = errorRows.length;
   const agents = new Set([...callCounts.keys(), ...emailCounts.keys(), ...errorCounts.keys()]);
