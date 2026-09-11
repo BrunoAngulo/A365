@@ -180,6 +180,8 @@ type IncidentSummary = {
   byMonth: ChartPoint[];
 };
 
+type ClientDirectoryRow = { branch: string; customerCode: string; customerName: string; seller: string };
+
 type AgentIndicatorRow = {
   agent: string;
   calls: number;
@@ -1319,6 +1321,21 @@ function countIncidentsBy(rows: IncidentRow[], key: keyof IncidentRow, sortBy: "
   return pointsFromMap(map, sortBy);
 }
 
+function mapClientDirectoryRows(rows: RawRow[]): ClientDirectoryRow[] {
+  if (!rows.length) return [];
+  const headers = Object.keys(rows[0]);
+  const branch = findColumn(headers, ["suc cliente", "suc.cliente", "sucursal cliente", "sucursal"]);
+  const customerCode = findColumn(headers, ["cod cliente", "cod.cliente", "codigo cliente", "código cliente"]);
+  const customerName = findColumn(headers, ["razon social", "razón social", "cliente"]);
+  const seller = findColumn(headers, ["vendedor", "seller"]);
+  return rows.map((row) => ({
+    branch: valueAsText(branch ? row[branch] : ""),
+    customerCode: valueAsText(customerCode ? row[customerCode] : ""),
+    customerName: valueAsText(customerName ? row[customerName] : ""),
+    seller: valueAsText(seller ? row[seller] : ""),
+  })).filter((row) => row.customerCode);
+}
+
 function buildIncidentSummary(rows: IncidentRow[]): IncidentSummary {
   const monthMap = new Map<string, number>();
   rows.forEach((row) => addToCount(monthMap, monthForGrouping(row.incidentDate)));
@@ -1762,6 +1779,7 @@ function ChartPanel({
 export default function Home() {
   const inputRef = useRef<HTMLInputElement>(null);
   const incidentInputRef = useRef<HTMLInputElement>(null);
+  const clientDirectoryInputRef = useRef<HTMLInputElement>(null);
   const matrixInputRef = useRef<HTMLInputElement>(null);
   const dateChartRef = useRef<HTMLDivElement>(null);
   const hourChartRef = useRef<HTMLDivElement>(null);
@@ -1805,6 +1823,8 @@ export default function Home() {
   const [incidentColumns, setIncidentColumns] = useState<string[]>([]);
   const [incidentFileName, setIncidentFileName] = useState("Sin archivo cargado");
   const [incidentError, setIncidentError] = useState("");
+  const [clientDirectory, setClientDirectory] = useState<ClientDirectoryRow[]>([]);
+  const [clientDirectoryFileName, setClientDirectoryFileName] = useState("Sin maestro de clientes");
   const salesInputRef = useRef<HTMLInputElement>(null);
   const [salesRows, setSalesRows] = useState<SalesRow[]>([]);
   const [salesFileName, setSalesFileName] = useState("Sin archivo cargado");
@@ -1941,11 +1961,19 @@ export default function Home() {
   const activeTimelineBlock =
     timelineRows.flatMap((row) => row.blocks).find((block) => block.id === hoveredTimelineId) ??
     timelineRows[0]?.blocks[0];
-  const incidentSummary = useMemo(() => buildIncidentSummary(incidentRows), [incidentRows]);
-  const incidentDetailRows = useMemo(() => incidentRows.slice(0, detailRowLimit), [incidentRows]);
-  const hiddenIncidentRows = Math.max(0, incidentRows.length - incidentDetailRows.length);
+  const enrichedIncidentRows = useMemo(() => {
+    if (!clientDirectory.length) return incidentRows;
+    const directory = new Map(clientDirectory.filter((item) => item.customerCode).map((item) => [normalizeKey(item.customerCode), item]));
+    return incidentRows.map((row) => {
+      const match = directory.get(normalizeKey(row.customerCode));
+      return match ? { ...row, branch: match.branch || row.branch, customerName: match.customerName || row.customerName, agent: match.seller || row.agent } : row;
+    });
+  }, [clientDirectory, incidentRows]);
+  const incidentSummary = useMemo(() => buildIncidentSummary(enrichedIncidentRows), [enrichedIncidentRows]);
+  const incidentDetailRows = useMemo(() => enrichedIncidentRows.slice(0, detailRowLimit), [enrichedIncidentRows]);
+  const hiddenIncidentRows = Math.max(0, enrichedIncidentRows.length - incidentDetailRows.length);
   const incidentAgentChartHeight = Math.max(280, Math.min(760, incidentSummary.byAgent.length * 38));
-  const performanceSummary = useMemo(() => buildPerformanceSummary(rows, matrixRows, incidentRows), [incidentRows, matrixRows, rows]);
+  const performanceSummary = useMemo(() => buildPerformanceSummary(rows, matrixRows, enrichedIncidentRows), [enrichedIncidentRows, matrixRows, rows]);
   const performanceChartHeight = Math.max(320, Math.min(760, performanceSummary.byAgent.length * 44));
   const campaignChartHeight = Math.max(280, Math.min(760, byCampaign.length * 38));
   const matrixUserChartHeight = Math.max(280, Math.min(620, matrixSummary.byUser.length * 38));
@@ -2976,6 +3004,23 @@ export default function Home() {
     }
   }
 
+  async function loadClientDirectoryFile(file: File) {
+    setIncidentError("");
+    try {
+      const mappedRows = mapClientDirectoryRows(rowsFromSheetRows(await readSheet(file)));
+      if (!mappedRows.length) throw new Error("No encontré códigos de cliente válidos en el maestro.");
+      setClientDirectory(mappedRows);
+      setClientDirectoryFileName(file.name);
+    } catch (currentError) {
+      setIncidentError(currentError instanceof Error ? currentError.message : "No pude leer el maestro de clientes.");
+    }
+  }
+
+  function handleClientDirectoryFiles(files: FileList | null) {
+    const file = files?.[0];
+    if (file) void loadClientDirectoryFile(file);
+  }
+
   async function loadApiLevels() {
     const fileDates = rows.map((row) => row.date).filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date)).sort();
     const apiStartDate = callStartDate || fileDates[0] || "";
@@ -3402,6 +3447,20 @@ export default function Home() {
                 accept=".xlsx,.xls,.csv,.txt,.tsv"
                 onChange={(event) => handleIncidentFiles(event.target.files)}
               />
+            </div>
+            <div
+              className={styles.inlineUpload}
+              onClick={() => clientDirectoryInputRef.current?.click()}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") clientDirectoryInputRef.current?.click();
+              }}
+            >
+              <FileSpreadsheet size={18} aria-hidden="true" />
+              <span>{clientDirectoryFileName}</span>
+              <strong>Cargar maestro</strong>
+              <input ref={clientDirectoryInputRef} type="file" accept=".xlsx,.xls,.csv,.tsv" onChange={(event) => handleClientDirectoryFiles(event.target.files)} />
             </div>
           </section>
 
