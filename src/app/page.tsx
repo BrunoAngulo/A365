@@ -201,6 +201,7 @@ type AgentIndicatorRow = {
   calls: number;
   emails: number;
   errors: number;
+  deviationRate: number;
   attended: number;
   productivity: number;
   quality: number;
@@ -1419,6 +1420,7 @@ function buildPerformanceSummary(callRows: MetricRow[], emailRows: MatrixRow[], 
       const attendedCalls = attendedCallCounts.get(agent) ?? 0;
       const attended = attendedCalls + emails;
       const quality = emails ? 100 - percentage(errors, emails) : 0;
+      const deviationRate = percentage(errors, emails);
       const callRate = percentage(attendedCalls, calls);
       const emailRate = percentage(emails, emails);
       const productivity = (callRate + emailRate) / 2;
@@ -1429,6 +1431,7 @@ function buildPerformanceSummary(callRows: MetricRow[], emailRows: MatrixRow[], 
         calls,
         emails,
         errors,
+        deviationRate,
         attended,
         productivity,
         quality,
@@ -2023,6 +2026,10 @@ export default function Home() {
   const hiddenIncidentRows = Math.max(0, enrichedIncidentRows.length - incidentDetailRows.length);
   const incidentAgentChartHeight = Math.max(280, Math.min(760, incidentSummary.byAgent.length * 38));
   const performanceSummary = useMemo(() => buildPerformanceSummary(rows, matrixRows, enrichedIncidentRows), [enrichedIncidentRows, matrixRows, rows]);
+  const performancePriority = useMemo(() => {
+    const candidates = performanceSummary.byAgent.filter((row) => row.emails >= 20).sort((a, b) => b.deviationRate - a.deviationRate || b.errors - a.errors);
+    return candidates[0] ?? null;
+  }, [performanceSummary.byAgent]);
   const performanceChartHeight = Math.max(320, Math.min(760, performanceSummary.byAgent.length * 44));
   const campaignChartHeight = Math.max(280, Math.min(760, byCampaign.length * 38));
   const matrixUserChartHeight = Math.max(280, Math.min(620, matrixSummary.byUser.length * 38));
@@ -3614,6 +3621,9 @@ export default function Home() {
             <StatCard icon={<Hash size={18} />} label="Productividad" value={formatPercent(performanceSummary.productivity)} />
             <StatCard icon={<Timer size={18} />} label="Calidad" value={formatPercent(performanceSummary.quality)} />
             <StatCard icon={<UserRound size={18} />} label="Eficiencia" value={formatPercent(performanceSummary.effectiveness)} />
+            <StatCard icon={<ClipboardList size={18} />} label="Tasa de desvíos" value={formatPercent(percentage(performanceSummary.totalErrors, performanceSummary.totalEmails))} />
+            <StatCard icon={<Hash size={18} />} label="Desvíos restantes · meta 10" value={Math.max(0, 10 - performanceSummary.totalErrors).toLocaleString("es-PE")} />
+            <StatCard icon={<UserRound size={18} />} label="Agente prioritario" value={performancePriority?.agent ?? "N/D"} />
           </div>
 
           <div className={styles.matrixGrid}>
@@ -3633,6 +3643,9 @@ export default function Home() {
                 Math.max(280, Math.min(620, performanceSummary.byAgent.length * 42)),
               )}
             </ChartPanel>
+            <ChartPanel title="Desvíos por mes" meta="Seguimiento contra la meta mensual">
+              {renderMatrixBarChart(incidentSummary.byMonth, "#dc2626")}
+            </ChartPanel>
           </div>
 
           <article className={styles.panel}>
@@ -3651,6 +3664,7 @@ export default function Home() {
                     <th>Correos</th>
                     <th>Atenciones</th>
                     <th>Errores</th>
+                    <th>Tasa de desvíos</th>
                     <th>Productividad</th>
                     <th>Calidad</th>
                     <th>Eficiencia</th>
@@ -3664,6 +3678,7 @@ export default function Home() {
                       <td>{row.emails.toLocaleString("es-PE")}</td>
                       <td>{row.attended.toLocaleString("es-PE")}</td>
                       <td>{row.errors.toLocaleString("es-PE")}</td>
+                      <td>{formatPercent(row.deviationRate)}</td>
                       <td>{formatPercent(row.productivity)}</td>
                       <td>{row.emails ? formatPercent(row.quality) : "Sin correos"}</td>
                       <td>{formatPercent(row.effectiveness)}</td>
