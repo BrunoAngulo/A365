@@ -2978,7 +2978,16 @@ export default function Home() {
     try {
       const token = apiBearer.trim().replace(/^Bearer\s+/i, "");
       const response = await fetch("/api/inbound-levels", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token, startDate: apiStartDate, endDate: apiEndDate }) });
-      const payload = await response.json() as { rows?: ApiLevelRow[]; daily?: ApiDailyRow[]; error?: string };
+      const responseText = await response.text();
+      if (!responseText.trim()) throw new Error("La API devolvió una respuesta vacía.");
+      let payload: { rows?: ApiLevelRow[]; daily?: ApiDailyRow[]; error?: string } = {};
+      if (responseText.trim()) {
+        try {
+          payload = JSON.parse(responseText) as typeof payload;
+        } catch {
+          throw new Error("La API devolvió una respuesta no válida.");
+        }
+      }
       if (!response.ok) throw new Error(payload.error || "No se pudo consultar la API");
       setApiLevelRows(payload.rows ?? []);
       setApiDailyRows(payload.daily ?? []);
