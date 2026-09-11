@@ -1421,7 +1421,11 @@ function buildPerformanceSummary(callRows: MetricRow[], emailRows: MatrixRow[], 
       const attended = attendedCalls + emails;
       const quality = emails ? 100 - percentage(errors, emails) : 0;
       const deviationRate = percentage(errors, emails);
-      const productivity = percentage(attended, calls + emails);
+      // Productividad = promedio de la atención telefónica y la atención de correos.
+      // Cada canal conserva su propio denominador para no mezclar volúmenes.
+      const callProductivity = calls ? percentage(attendedCalls, calls) : 0;
+      const emailProductivity = emails ? percentage(emails, emails) : 0;
+      const productivity = (callProductivity + emailProductivity) / 2;
       const efficiency = (productivity * quality) / 100;
 
       return {
@@ -1439,7 +1443,9 @@ function buildPerformanceSummary(callRows: MetricRow[], emailRows: MatrixRow[], 
     .sort((a, b) => b.attended - a.attended || b.errors - a.errors || a.agent.localeCompare(b.agent));
 
   const quality = totalEmails ? 100 - percentage(totalErrors, totalEmails) : 0;
-  const productivity = percentage(totalAttended, totalCalls + totalEmails);
+  const callProductivity = totalCalls ? percentage(totalAttendedCalls, totalCalls) : 0;
+  const emailProductivity = totalEmails ? percentage(totalEmails, totalEmails) : 0;
+  const productivity = (callProductivity + emailProductivity) / 2;
   const effectiveness = (productivity * quality) / 100;
 
   return {
