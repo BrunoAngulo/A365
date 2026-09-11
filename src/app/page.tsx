@@ -185,6 +185,11 @@ type IncidentSummary = {
 type ClientDirectoryRow = { branch: string; customerCode: string; customerName: string; seller: string };
 
 const excludedPerformanceCallAgents = new Set(["ahuaman", "vdcl", "psalas", "csalas", "derivador_sur", "derivador_am"]);
+const performanceAgentAliases = new Map([
+  ["ffernadez", "ffernadez"],
+  ["claura", "claura"],
+  ["csanchez", "csanchez"],
+]);
 
 type AgentIndicatorRow = {
   agent: string;
@@ -1376,7 +1381,8 @@ function buildIncidentSummary(rows: IncidentRow[]): IncidentSummary {
 }
 
 function incrementAgent(map: Map<string, number>, agent: string, amount = 1) {
-  const key = agent || "Sin agente";
+  const normalized = normalizeKey(agent || "Sin agente");
+  const key = (performanceAgentAliases.get(normalized) ?? normalized) || "sin agente";
   map.set(key, (map.get(key) ?? 0) + amount);
 }
 
