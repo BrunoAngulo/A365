@@ -1959,7 +1959,7 @@ export default function Home() {
     return monthlyCallData.map((month) => ({
       ...month,
       abandoned: Math.max(0, month.received - month.attended),
-      under20: monthChartRows.filter((row) => row.month === month.name && isAttendedCall(row) && row.durationSeconds >= 0 && row.durationSeconds <= 20).length,
+      under20: monthChartRows.filter((row) => row.month === month.name && isAttendedCall(row) && row.waitSeconds !== null && row.waitSeconds >= 0 && row.waitSeconds <= 20).length,
     }));
   }, [monthChartRows, monthlyCallData]);
   const serviceSummary = useMemo(() => buildServiceSummary(visibleRows, selectedStatusNames), [selectedStatusNames, visibleRows]);
@@ -3752,8 +3752,8 @@ export default function Home() {
       <section className={styles.dashboardGrid}>
         <ChartPanel
           title="Llamadas por mes"
-          meta={`${monthlyCallData.length} meses · <20s según Tiempo hablado`}
-          info="Campos: Fecha, Corte de llamada y Tiempo hablado. La serie Llamadas <20s cuenta llamadas atendidas cuyo Tiempo hablado esté entre 0 y 20 segundos, inclusive."
+          meta={`${monthlyCallData.length} meses · <20s según Tiempo en espera (Cola)`}
+          info="Campos: Fecha, Corte de llamada y Tiempo en espera (Cola). La serie Llamadas <20s cuenta llamadas atendidas cuyo tiempo de espera esté entre 0 y 20 segundos, inclusive."
           comparison={callComparisonBadge("volumen", (month) => month.received)}
           onExpand={() => setExpandedChart("date")}
           onExport={() => void exportChart("date", "Llamadas por mes")}
