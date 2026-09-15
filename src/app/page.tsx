@@ -310,6 +310,8 @@ type PersistedDashboardState = {
   statusFocus: string | null;
   callStartDate: string;
   callEndDate: string;
+  incidentStartDate: string;
+  incidentEndDate: string;
   activeView: DashboardView;
   timelineDay: string;
   timelineScale: TimelineScale;
@@ -1410,8 +1412,12 @@ function mapClientProfiles(sheetRows: Row[]): ClientProfile[] {
   // BDCLIENTE contiene cuatro bloques paralelos: Centro, Norte, Oriente y Sur.
   const profiles: ClientProfile[] = [];
   const offsets = [0, 9, 18, 27];
+  const headerRow = sheetRows.findIndex((row) =>
+    row.some((cell) => normalizeKey(valueAsText(cell)) === "region") &&
+    row.some((cell) => normalizeKey(valueAsText(cell)) === "cliente"),
+  );
 
-  sheetRows.slice(2).forEach((row) => {
+  sheetRows.slice(headerRow >= 0 ? headerRow + 1 : 2).forEach((row) => {
     offsets.forEach((offset) => {
       const region = valueAsText(row[offset]);
       const customerName = valueAsText(row[offset + 1]);
@@ -1958,6 +1964,8 @@ export default function Home() {
   const [incidentFileName, setIncidentFileName] = useState("Sin archivo cargado");
   const [incidentError, setIncidentError] = useState("");
   const [clientProfiles, setClientProfiles] = useState<ClientProfile[]>([]);
+  const [incidentStartDate, setIncidentStartDate] = useState("");
+  const [incidentEndDate, setIncidentEndDate] = useState("");
   const salesInputRef = useRef<HTMLInputElement>(null);
   const [salesRows, setSalesRows] = useState<SalesRow[]>([]);
   const [salesFileName, setSalesFileName] = useState("Sin archivo cargado");
@@ -2094,21 +2102,25 @@ export default function Home() {
   const activeTimelineBlock =
     timelineRows.flatMap((row) => row.blocks).find((block) => block.id === hoveredTimelineId) ??
     timelineRows[0]?.blocks[0];
+  const dateFilteredIncidentRows = useMemo(() => incidentRows.filter((row) => {
+    const date = parseDateParts(row.incidentDate, "").date;
+    return date !== "Sin fecha" && (!incidentStartDate || date >= incidentStartDate) && (!incidentEndDate || date <= incidentEndDate);
+  }), [incidentEndDate, incidentRows, incidentStartDate]);
   const enrichedIncidentRows = useMemo(() => {
-    if (!clientProfiles.length) return incidentRows;
+    if (!clientProfiles.length) return dateFilteredIncidentRows;
     const profilesByCustomer = new Map<string, ClientProfile[]>();
     clientProfiles.forEach((profile) => {
       const key = normalizeKey(profile.customerName);
       profilesByCustomer.set(key, [...(profilesByCustomer.get(key) ?? []), profile]);
     });
-    return incidentRows.map((row) => {
+    return dateFilteredIncidentRows.map((row) => {
       const matches = profilesByCustomer.get(normalizeKey(row.customerName)) ?? [];
       const match = [...matches].sort((a, b) => b.revenue - a.revenue)[0];
       return match
         ? { ...row, customerRegion: match.region, customerClassification: match.classification, customerRevenue: match.revenue }
         : row;
     });
-  }, [clientProfiles, incidentRows]);
+  }, [clientProfiles, dateFilteredIncidentRows]);
   const incidentSummary = useMemo(() => buildIncidentSummary(enrichedIncidentRows), [enrichedIncidentRows]);
   const mappedClientCount = useMemo(
     () => new Set(enrichedIncidentRows.filter((row) => row.customerRegion !== "Sin región").map((row) => normalizeKey(row.customerName))).size,
@@ -2191,6 +2203,8 @@ export default function Home() {
         if (typeof savedDashboard.statusFocus === "string" || savedDashboard.statusFocus === null) setStatusFocus(savedDashboard.statusFocus);
         if (typeof savedDashboard.callStartDate === "string") setCallStartDate(savedDashboard.callStartDate);
         if (typeof savedDashboard.callEndDate === "string") setCallEndDate(savedDashboard.callEndDate);
+        if (typeof savedDashboard.incidentStartDate === "string") setIncidentStartDate(savedDashboard.incidentStartDate);
+        if (typeof savedDashboard.incidentEndDate === "string") setIncidentEndDate(savedDashboard.incidentEndDate);
         if (savedDashboard.activeView === "calls" || savedDashboard.activeView === "matrix" || savedDashboard.activeView === "sales" || savedDashboard.activeView === "errors" || savedDashboard.activeView === "performance") setActiveView(savedDashboard.activeView);
         if (typeof savedDashboard.timelineDay === "string") setTimelineDay(savedDashboard.timelineDay);
         if (savedDashboard.timelineScale === "30m" || savedDashboard.timelineScale === "1h" || savedDashboard.timelineScale === "day") setTimelineScale(savedDashboard.timelineScale);
@@ -2214,6 +2228,8 @@ export default function Home() {
         statusFocus,
         callStartDate,
         callEndDate,
+        incidentStartDate,
+        incidentEndDate,
         activeView,
         timelineDay,
         timelineScale,
@@ -2223,7 +2239,7 @@ export default function Home() {
     } catch {
       // La persistencia es opcional; el dashboard sigue funcionando si el almacenamiento no tiene espacio.
     }
-  }, [activeView, callEndDate, callStartDate, dashboardFocus, emailHourChronological, matrixColumns, matrixFileName, matrixRangeLabel, matrixRows, persistenceReady, selectedStatusNames, showSlowResolutionOnly, statusFocus, timelineDay, timelineScale]);
+  }, [activeView, callEndDate, callStartDate, dashboardFocus, emailHourChronological, incidentEndDate, incidentStartDate, matrixColumns, matrixFileName, matrixRangeLabel, matrixRows, persistenceReady, selectedStatusNames, showSlowResolutionOnly, statusFocus, timelineDay, timelineScale]);
 
   useEffect(() => {
     function handleExtensionMessage(event: MessageEvent) {
@@ -3565,6 +3581,12 @@ export default function Home() {
                 onChange={(event) => handleIncidentFiles(event.target.files)}
               />
             </div>
+            <div className={styles.callDateFilter}>
+              <span>Filtrar por fecha de incidente</span>
+              <label>Desde<input type="date" value={incidentStartDate} onChange={(event) => setIncidentStartDate(event.target.value)} /></label>
+              <label>Hasta<input type="date" value={incidentEndDate} onChange={(event) => setIncidentEndDate(event.target.value)} /></label>
+              {(incidentStartDate || incidentEndDate) ? <button type="button" onClick={() => { setIncidentStartDate(""); setIncidentEndDate(""); }}>Limpiar</button> : null}
+            </div>
           </section>
 
           {incidentRows.length ? (
@@ -3575,7 +3597,7 @@ export default function Home() {
                   <h2>Desvíos registrados</h2>
                   <p>Resumen desde DATA y cruce automático con BDCLIENTE</p>
                 </div>
-                <strong>{incidentRows.length.toLocaleString("es-PE")} incidencias</strong>
+                <strong>{incidentSummary.total.toLocaleString("es-PE")} de {incidentRows.length.toLocaleString("es-PE")} incidencias</strong>
               </div>
 
               <div className={styles.statsGrid}>
