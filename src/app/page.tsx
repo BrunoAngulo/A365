@@ -19,6 +19,7 @@ import {
 } from "recharts";
 import { readSheet } from "read-excel-file/browser";
 import type { Row } from "read-excel-file/browser";
+import * as XLSX from "xlsx";
 import {
   Clock3,
   ClipboardList,
@@ -1352,6 +1353,15 @@ function countIncidentsBy(rows: IncidentRow[], key: keyof IncidentRow, sortBy: "
   return sortBy === "name" ? points.sort((a, b) => a.name.localeCompare(b.name)) : points.sort((a, b) => b.total - a.total);
 }
 
+async function readLegacyWorkbook(file: File): Promise<RawRow[]> {
+  const buffer = await file.arrayBuffer();
+  const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
+  const firstSheet = workbook.Sheets[workbook.SheetNames[0] ?? ""];
+  if (!firstSheet) return [];
+  const rows = XLSX.utils.sheet_to_json<unknown[]>(firstSheet, { header: 1, defval: "", raw: true }) as Row[];
+  return rowsFromSpreadsheet(rows);
+}
+
 function normalizeClientCode(value: string) {
   const normalized = value.trim().replace(/\s+/g, "");
   return /^\d+$/.test(normalized) ? normalized.replace(/^0+(?=\d)/, "") : normalizeKey(normalized);
@@ -2232,8 +2242,10 @@ export default function Home() {
       const extension = file.name.split(".").pop()?.toLowerCase();
       let rawRows: RawRow[];
 
-      if (extension === "xlsx" || extension === "xls") {
+      if (extension === "xlsx") {
         rawRows = rowsFromSpreadsheet(await readSheet(file));
+      } else if (extension === "xls") {
+        rawRows = await readLegacyWorkbook(file);
       } else {
         rawRows = parseDelimitedText(await file.text());
       }
