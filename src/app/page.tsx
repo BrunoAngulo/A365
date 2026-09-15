@@ -90,6 +90,11 @@ type ChartPoint = {
   total: number;
 };
 
+type IncidentMonthPoint = ChartPoint & {
+  proceedsYes: number;
+  proceedsNo: number;
+};
+
 type UserPerformancePoint = { name: string; received: number; attended: number; attentionRate: number };
 
 type FilterField = "date" | "week" | "month" | "hour" | "statusName" | "campaignId" | "user" | "listName";
@@ -179,7 +184,7 @@ type IncidentSummary = {
   byAgent: ChartPoint[];
   byType: ChartPoint[];
   byBranch: ChartPoint[];
-  byMonth: ChartPoint[];
+  byMonth: IncidentMonthPoint[];
   proceedsYes: number;
   proceedsNo: number;
 };
@@ -1383,8 +1388,16 @@ function mapClientDirectoryRows(rows: RawRow[]): ClientDirectoryRow[] {
 }
 
 function buildIncidentSummary(rows: IncidentRow[]): IncidentSummary {
-  const monthMap = new Map<string, number>();
-  rows.forEach((row) => addToCount(monthMap, monthForGrouping(row.incidentDate)));
+  const monthMap = new Map<string, IncidentMonthPoint>();
+  rows.forEach((row) => {
+    const name = monthForGrouping(row.incidentDate);
+    const point = monthMap.get(name) ?? { name, total: 0, proceedsYes: 0, proceedsNo: 0 };
+    point.total += 1;
+    const proceeds = normalizeKey(row.proceeds);
+    if (proceeds === "si" || proceeds === "sí") point.proceedsYes += 1;
+    if (proceeds === "no") point.proceedsNo += 1;
+    monthMap.set(name, point);
+  });
   const proceedsYes = rows.filter((row) => normalizeKey(row.proceeds) === "si" || normalizeKey(row.proceeds) === "sí").length;
   const proceedsNo = rows.filter((row) => normalizeKey(row.proceeds) === "no").length;
 
@@ -1396,7 +1409,7 @@ function buildIncidentSummary(rows: IncidentRow[]): IncidentSummary {
     byAgent: countIncidentsBy(rows, "agent"),
     byType: countIncidentsBy(rows, "inconsistencyType"),
     byBranch: countIncidentsBy(rows, "branch"),
-    byMonth: pointsFromMap(monthMap, "name"),
+    byMonth: Array.from(monthMap.values()).sort((a, b) => a.name.localeCompare(b.name)),
     proceedsYes,
     proceedsNo,
   };
@@ -3580,7 +3593,17 @@ export default function Home() {
                   {renderMatrixBarChart(incidentSummary.byBranch, "#059669")}
                 </ChartPanel>
                 <ChartPanel title="Por mes" meta={`${incidentSummary.byMonth.length} meses`}>
-                  {renderMatrixBarChart(incidentSummary.byMonth, "#475569")}
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={incidentSummary.byMonth} margin={{ left: 8, right: 16, top: 8, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#dce5f0" />
+                      <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                      <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="proceedsYes" name="Proceden" fill="#2563eb" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="proceedsNo" name="No proceden" fill="#dc2626" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
                 </ChartPanel>
               </div>
 
