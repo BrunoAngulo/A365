@@ -174,6 +174,7 @@ type IncidentRow = {
   customerRegion: string;
   customerClassification: string;
   customerRevenue: number;
+  customerAffected: boolean;
   raw: Record<string, string>;
 };
 
@@ -182,6 +183,7 @@ type ClientProfile = {
   customerName: string;
   classification: string;
   revenue: number;
+  isAffected: boolean;
 };
 
 type ClientImpactPoint = ChartPoint & {
@@ -1372,6 +1374,7 @@ function mapIncidentRows(rows: RawRow[]) {
     customerRegion: "Sin región",
     customerClassification: "Sin clasificación",
     customerRevenue: 0,
+    customerAffected: false,
     raw: headers.reduce<Record<string, string>>((record, header) => {
       record[header] = valueAsText(row[header]);
       return record;
@@ -1422,8 +1425,10 @@ function mapClientProfiles(sheetRows: Row[]): ClientProfile[] {
       const region = valueAsText(row[offset]);
       const customerName = valueAsText(row[offset + 1]);
       const classification = valueAsText(row[offset + 6]).toUpperCase();
-      const revenue = revenueFromValue(row[offset + 7]);
-      if (region && customerName) profiles.push({ region, customerName, classification: classification || "Sin clasificación", revenue });
+      const revenueCell = valueAsText(row[offset + 7]);
+      const revenue = revenueFromValue(revenueCell);
+      const isAffected = Boolean(revenueCell.trim()) && revenueCell.replace(/\s+/g, "") !== "-";
+      if (region && customerName) profiles.push({ region, customerName, classification: classification || "Sin clasificación", revenue, isAffected });
     });
   });
 
@@ -1444,7 +1449,7 @@ function buildIncidentSummary(rows: IncidentRow[]): IncidentSummary {
   const proceedsYes = rows.filter((row) => normalizeKey(row.proceeds) === "si" || normalizeKey(row.proceeds) === "sí").length;
   const proceedsNo = rows.filter((row) => normalizeKey(row.proceeds) === "no").length;
   const priorityCustomers = new Map<string, ClientImpactPoint>();
-  rows.filter((row) => row.customerClassification !== "Sin clasificación").forEach((row) => {
+  rows.filter((row) => row.customerAffected && row.customerClassification !== "Sin clasificación").forEach((row) => {
     const key = `${normalizeKey(row.customerName)}|${normalizeKey(row.customerRegion)}|${row.customerClassification}`;
     const point = priorityCustomers.get(key) ?? {
       name: row.customerName,
@@ -2117,18 +2122,18 @@ export default function Home() {
       const matches = profilesByCustomer.get(normalizeKey(row.customerName)) ?? [];
       const match = [...matches].sort((a, b) => b.revenue - a.revenue)[0];
       return match
-        ? { ...row, customerRegion: match.region, customerClassification: match.classification, customerRevenue: match.revenue }
+        ? { ...row, customerRegion: match.region, customerClassification: match.classification, customerRevenue: match.revenue, customerAffected: match.isAffected }
         : row;
     });
   }, [clientProfiles, dateFilteredIncidentRows]);
   const incidentSummary = useMemo(() => buildIncidentSummary(enrichedIncidentRows), [enrichedIncidentRows]);
   const mappedClientCount = useMemo(
-    () => new Set(enrichedIncidentRows.filter((row) => row.customerRegion !== "Sin región").map((row) => normalizeKey(row.customerName))).size,
-    [enrichedIncidentRows],
+    () => new Set(clientProfiles.map((profile) => `${normalizeKey(profile.region)}|${normalizeKey(profile.customerName)}`)).size,
+    [clientProfiles],
   );
-  const priorityAClientCount = useMemo(
-    () => new Set(enrichedIncidentRows.filter((row) => row.customerClassification === "A").map((row) => normalizeKey(row.customerName))).size,
-    [enrichedIncidentRows],
+  const affectedClientCount = useMemo(
+    () => new Set(clientProfiles.filter((profile) => profile.isAffected).map((profile) => `${normalizeKey(profile.region)}|${normalizeKey(profile.customerName)}`)).size,
+    [clientProfiles],
   );
   const incidentDetailRows = useMemo(() => enrichedIncidentRows.slice(0, detailRowLimit), [enrichedIncidentRows]);
   const hiddenIncidentRows = Math.max(0, enrichedIncidentRows.length - incidentDetailRows.length);
@@ -3608,7 +3613,7 @@ export default function Home() {
                 <StatCard icon={<ClipboardList size={18} />} label="Desvíos" value={incidentSummary.proceedsYes.toLocaleString("es-PE")} />
                 <StatCard icon={<ClipboardList size={18} />} label="Refutados" value={incidentSummary.proceedsNo.toLocaleString("es-PE")} />
                 <StatCard icon={<FileSpreadsheet size={18} />} label="Clientes mapeados" value={mappedClientCount.toLocaleString("es-PE")} />
-                <StatCard icon={<Hash size={18} />} label="Clientes A afectados" value={priorityAClientCount.toLocaleString("es-PE")} />
+                <StatCard icon={<Hash size={18} />} label="Clientes afectados" value={affectedClientCount.toLocaleString("es-PE")} />
               </div>
 
               <div className={styles.matrixGrid}>
