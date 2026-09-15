@@ -171,7 +171,23 @@ type IncidentRow = {
   detail: string;
   impact: string;
   proceeds: string;
+  customerRegion: string;
+  customerClassification: string;
+  customerRevenue: number;
   raw: Record<string, string>;
+};
+
+type ClientProfile = {
+  region: string;
+  customerName: string;
+  classification: string;
+  revenue: number;
+};
+
+type ClientImpactPoint = ChartPoint & {
+  region: string;
+  classification: string;
+  revenue: number;
 };
 
 type IncidentSummary = {
@@ -183,11 +199,12 @@ type IncidentSummary = {
   byType: ChartPoint[];
   byBranch: ChartPoint[];
   byMonth: IncidentMonthPoint[];
+  byCustomerRegion: ChartPoint[];
+  byCustomerClassification: ChartPoint[];
+  topPriorityCustomers: ClientImpactPoint[];
   proceedsYes: number;
   proceedsNo: number;
 };
-
-type ClientDirectoryRow = { branch: string; customerCode: string; customerName: string; seller: string };
 
 const excludedPerformanceCallAgents = new Set(["ahuaman", "vdcl", "psalas", "csalas", "derivador_sur", "derivador_am"]);
 const performanceAgentAliases = new Map([
@@ -1350,6 +1367,9 @@ function mapIncidentRows(rows: RawRow[]) {
     detail: valueAsText(columns.detail ? row[columns.detail] : "") || "Sin detalle",
     impact: valueAsText(columns.impact ? row[columns.impact] : "") || "Sin impacto",
     proceeds: valueAsText(columns.proceeds ? row[columns.proceeds] : "") || "Sin dato",
+    customerRegion: "Sin región",
+    customerClassification: "Sin clasificación",
+    customerRevenue: 0,
     raw: headers.reduce<Record<string, string>>((record, header) => {
       record[header] = valueAsText(row[header]);
       return record;
@@ -1380,24 +1400,28 @@ async function readLegacyWorkbook(file: File): Promise<RawRow[]> {
   return rowsFromSpreadsheet(rows);
 }
 
-function normalizeClientCode(value: string) {
-  const normalized = value.trim().replace(/\s+/g, "");
-  return /^\d+$/.test(normalized) ? normalized.replace(/^0+(?=\d)/, "") : normalizeKey(normalized);
+function revenueFromValue(value: unknown) {
+  const digits = valueAsText(value).replace(/[^0-9.-]/g, "");
+  const parsed = Number(digits);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function mapClientDirectoryRows(rows: RawRow[]): ClientDirectoryRow[] {
-  if (!rows.length) return [];
-  const headers = Object.keys(rows[0]);
-  const branch = findColumn(headers, ["suc cliente", "suc.cliente", "sucursal cliente", "sucursal"]);
-  const customerCode = findColumn(headers, ["cod cliente", "cod.cliente", "codigo cliente", "código cliente"]);
-  const customerName = findColumn(headers, ["razon social", "razón social", "cliente"]);
-  const seller = findColumn(headers, ["vendedor", "seller"]);
-  return rows.map((row) => ({
-    branch: valueAsText(branch ? row[branch] : ""),
-    customerCode: valueAsText(customerCode ? row[customerCode] : ""),
-    customerName: valueAsText(customerName ? row[customerName] : ""),
-    seller: valueAsText(seller ? row[seller] : ""),
-  })).filter((row) => row.customerCode);
+function mapClientProfiles(sheetRows: Row[]): ClientProfile[] {
+  // BDCLIENTE contiene cuatro bloques paralelos: Centro, Norte, Oriente y Sur.
+  const profiles: ClientProfile[] = [];
+  const offsets = [0, 9, 18, 27];
+
+  sheetRows.slice(2).forEach((row) => {
+    offsets.forEach((offset) => {
+      const region = valueAsText(row[offset]);
+      const customerName = valueAsText(row[offset + 1]);
+      const classification = valueAsText(row[offset + 6]).toUpperCase();
+      const revenue = revenueFromValue(row[offset + 7]);
+      if (region && customerName) profiles.push({ region, customerName, classification: classification || "Sin clasificación", revenue });
+    });
+  });
+
+  return profiles;
 }
 
 function buildIncidentSummary(rows: IncidentRow[]): IncidentSummary {
@@ -1413,6 +1437,19 @@ function buildIncidentSummary(rows: IncidentRow[]): IncidentSummary {
   });
   const proceedsYes = rows.filter((row) => normalizeKey(row.proceeds) === "si" || normalizeKey(row.proceeds) === "sí").length;
   const proceedsNo = rows.filter((row) => normalizeKey(row.proceeds) === "no").length;
+  const priorityCustomers = new Map<string, ClientImpactPoint>();
+  rows.filter((row) => row.customerClassification !== "Sin clasificación").forEach((row) => {
+    const key = `${normalizeKey(row.customerName)}|${normalizeKey(row.customerRegion)}|${row.customerClassification}`;
+    const point = priorityCustomers.get(key) ?? {
+      name: row.customerName,
+      total: 0,
+      region: row.customerRegion,
+      classification: row.customerClassification,
+      revenue: row.customerRevenue,
+    };
+    point.total += 1;
+    priorityCustomers.set(key, point);
+  });
 
   return {
     total: rows.length,
@@ -1423,6 +1460,12 @@ function buildIncidentSummary(rows: IncidentRow[]): IncidentSummary {
     byType: countIncidentsBy(rows, "inconsistencyType"),
     byBranch: countIncidentsBy(rows, "branch"),
     byMonth: Array.from(monthMap.values()).sort((a, b) => a.name.localeCompare(b.name)),
+    byCustomerRegion: countIncidentsBy(rows, "customerRegion").filter((point) => point.name !== "Sin región"),
+    byCustomerClassification: countIncidentsBy(rows, "customerClassification").filter((point) => point.name !== "Sin clasificación"),
+    topPriorityCustomers: Array.from(priorityCustomers.values()).sort((a, b) => {
+      const rank = (classification: string) => ({ A: 0, B: 1, C: 2 }[classification] ?? 3);
+      return rank(a.classification) - rank(b.classification) || b.total - a.total || b.revenue - a.revenue;
+    }).slice(0, 10),
     proceedsYes,
     proceedsNo,
   };
@@ -1876,7 +1919,6 @@ function ChartPanel({
 export default function Home() {
   const inputRef = useRef<HTMLInputElement>(null);
   const incidentInputRef = useRef<HTMLInputElement>(null);
-  const clientDirectoryInputRef = useRef<HTMLInputElement>(null);
   const matrixInputRef = useRef<HTMLInputElement>(null);
   const dateChartRef = useRef<HTMLDivElement>(null);
   const hourChartRef = useRef<HTMLDivElement>(null);
@@ -1915,8 +1957,7 @@ export default function Home() {
   const [incidentColumns, setIncidentColumns] = useState<string[]>([]);
   const [incidentFileName, setIncidentFileName] = useState("Sin archivo cargado");
   const [incidentError, setIncidentError] = useState("");
-  const [clientDirectory, setClientDirectory] = useState<ClientDirectoryRow[]>([]);
-  const [clientDirectoryFileName, setClientDirectoryFileName] = useState("Sin maestro de clientes");
+  const [clientProfiles, setClientProfiles] = useState<ClientProfile[]>([]);
   const salesInputRef = useRef<HTMLInputElement>(null);
   const [salesRows, setSalesRows] = useState<SalesRow[]>([]);
   const [salesFileName, setSalesFileName] = useState("Sin archivo cargado");
@@ -2054,16 +2095,29 @@ export default function Home() {
     timelineRows.flatMap((row) => row.blocks).find((block) => block.id === hoveredTimelineId) ??
     timelineRows[0]?.blocks[0];
   const enrichedIncidentRows = useMemo(() => {
-    if (!clientDirectory.length) return incidentRows;
-    const directory = new Map(clientDirectory.filter((item) => item.customerCode).map((item) => [normalizeClientCode(item.customerCode), item]));
-    return incidentRows.map((row) => {
-      const match = directory.get(normalizeClientCode(row.customerCode));
-      // El agente operativo viene de DATA DD (columna AGENTE). El maestro
-      // complementa únicamente sucursal y razón social.
-      return match ? { ...row, branch: match.branch || row.branch, customerName: match.customerName || row.customerName } : row;
+    if (!clientProfiles.length) return incidentRows;
+    const profilesByCustomer = new Map<string, ClientProfile[]>();
+    clientProfiles.forEach((profile) => {
+      const key = normalizeKey(profile.customerName);
+      profilesByCustomer.set(key, [...(profilesByCustomer.get(key) ?? []), profile]);
     });
-  }, [clientDirectory, incidentRows]);
+    return incidentRows.map((row) => {
+      const matches = profilesByCustomer.get(normalizeKey(row.customerName)) ?? [];
+      const match = [...matches].sort((a, b) => b.revenue - a.revenue)[0];
+      return match
+        ? { ...row, customerRegion: match.region, customerClassification: match.classification, customerRevenue: match.revenue }
+        : row;
+    });
+  }, [clientProfiles, incidentRows]);
   const incidentSummary = useMemo(() => buildIncidentSummary(enrichedIncidentRows), [enrichedIncidentRows]);
+  const mappedClientCount = useMemo(
+    () => new Set(enrichedIncidentRows.filter((row) => row.customerRegion !== "Sin región").map((row) => normalizeKey(row.customerName))).size,
+    [enrichedIncidentRows],
+  );
+  const priorityAClientCount = useMemo(
+    () => new Set(enrichedIncidentRows.filter((row) => row.customerClassification === "A").map((row) => normalizeKey(row.customerName))).size,
+    [enrichedIncidentRows],
+  );
   const incidentDetailRows = useMemo(() => enrichedIncidentRows.slice(0, detailRowLimit), [enrichedIncidentRows]);
   const hiddenIncidentRows = Math.max(0, enrichedIncidentRows.length - incidentDetailRows.length);
   const incidentAgentChartHeight = Math.max(280, Math.min(760, incidentSummary.byAgent.length * 38));
@@ -2304,17 +2358,27 @@ export default function Home() {
     try {
       const extension = file.name.split(".").pop()?.toLowerCase();
       let rawRows: RawRow[];
+      let profiles: ClientProfile[] = [];
 
       if (extension === "xlsx" || extension === "xls") {
         let sheetRows: Row[];
 
         try {
-          sheetRows = await readSheet(file, "BASE");
+          sheetRows = await readSheet(file, "DATA");
         } catch {
-          sheetRows = await readSheet(file);
+          try {
+            sheetRows = await readSheet(file, "BASE");
+          } catch {
+            sheetRows = await readSheet(file);
+          }
         }
 
         rawRows = rowsFromSheetRows(sheetRows);
+        try {
+          profiles = mapClientProfiles(await readSheet(file, "BDCLIENTE"));
+        } catch {
+          // Los archivos históricos sin hoja BDCLIENTE siguen cargando incidencias.
+        }
       } else {
         rawRows = parseDelimitedText(await file.text());
       }
@@ -2327,6 +2391,7 @@ export default function Home() {
 
       setIncidentRows(mappedRows);
       setIncidentColumns(Object.keys(rawRows[0] ?? {}));
+      setClientProfiles(profiles);
     } catch (currentError) {
       setIncidentError(currentError instanceof Error ? currentError.message : "No pude leer el archivo de incidencias.");
     }
@@ -3101,23 +3166,6 @@ export default function Home() {
     return null;
   }
 
-  async function loadClientDirectoryFile(file: File) {
-    setIncidentError("");
-    try {
-      const mappedRows = mapClientDirectoryRows(rowsFromSheetRows(await readSheet(file)));
-      if (!mappedRows.length) throw new Error("No encontré códigos de cliente válidos en el maestro.");
-      setClientDirectory(mappedRows);
-      setClientDirectoryFileName(file.name);
-    } catch (currentError) {
-      setIncidentError(currentError instanceof Error ? currentError.message : "No pude leer el maestro de clientes.");
-    }
-  }
-
-  function handleClientDirectoryFiles(files: FileList | null) {
-    const file = files?.[0];
-    if (file) void loadClientDirectoryFile(file);
-  }
-
   function submitAccess(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (accessPassword !== "Palabra!Aleatoria2026#") {
@@ -3494,7 +3542,7 @@ export default function Home() {
           <section className={styles.reportPanel} onClick={stopInsideClick}>
             <div>
               <h2>Desvíos e incidencias</h2>
-              <span>Carga el Excel de incidencias para cuantificar desvíos por agente, sucursal y tipo.</span>
+              <span>Un solo Excel: hoja DATA para incidencias y BDCLIENTE para región y clasificación ABC.</span>
             </div>
             <div
               className={styles.inlineUpload}
@@ -3517,20 +3565,6 @@ export default function Home() {
                 onChange={(event) => handleIncidentFiles(event.target.files)}
               />
             </div>
-            <div
-              className={styles.inlineUpload}
-              onClick={() => clientDirectoryInputRef.current?.click()}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") clientDirectoryInputRef.current?.click();
-              }}
-            >
-              <FileSpreadsheet size={18} aria-hidden="true" />
-              <span>{clientDirectoryFileName}</span>
-              <strong>Cargar maestro</strong>
-              <input ref={clientDirectoryInputRef} type="file" accept=".xlsx,.xls,.csv,.tsv" onChange={(event) => handleClientDirectoryFiles(event.target.files)} />
-            </div>
           </section>
 
           {incidentRows.length ? (
@@ -3539,7 +3573,7 @@ export default function Home() {
                 <div>
                   <span className={styles.eyebrow}>Desvíos e incidencias</span>
                   <h2>Desvíos registrados</h2>
-                  <p>Resumen desde la hoja BASE del registro de incidencias</p>
+                  <p>Resumen desde DATA y cruce automático con BDCLIENTE</p>
                 </div>
                 <strong>{incidentRows.length.toLocaleString("es-PE")} incidencias</strong>
               </div>
@@ -3551,6 +3585,8 @@ export default function Home() {
                 <StatCard icon={<FileSpreadsheet size={18} />} label="Sucursales" value={incidentSummary.uniqueBranches.toLocaleString("es-PE")} />
                 <StatCard icon={<ClipboardList size={18} />} label="Desvíos" value={incidentSummary.proceedsYes.toLocaleString("es-PE")} />
                 <StatCard icon={<ClipboardList size={18} />} label="Refutados" value={incidentSummary.proceedsNo.toLocaleString("es-PE")} />
+                <StatCard icon={<FileSpreadsheet size={18} />} label="Clientes mapeados" value={mappedClientCount.toLocaleString("es-PE")} />
+                <StatCard icon={<Hash size={18} />} label="Clientes A afectados" value={priorityAClientCount.toLocaleString("es-PE")} />
               </div>
 
               <div className={styles.matrixGrid}>
@@ -3575,6 +3611,15 @@ export default function Home() {
                       <Bar dataKey="proceedsNo" name="No proceden" fill="#dc2626" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
+                </ChartPanel>
+                <ChartPanel title="Incidencias por región" meta="Región de BDCLIENTE">
+                  {renderMatrixBarChart(incidentSummary.byCustomerRegion, "#7c3aed")}
+                </ChartPanel>
+                <ChartPanel title="Incidencias por clasificación" meta="Clasificación ABC de BDCLIENTE">
+                  {renderMatrixBarChart(incidentSummary.byCustomerClassification, "#f97316")}
+                </ChartPanel>
+                <ChartPanel title="Clientes principales afectados" meta="Prioriza ABC A, luego B y C">
+                  {incidentSummary.topPriorityCustomers.length ? <div className={styles.tableWrap}><table><thead><tr><th>Cliente</th><th>Región</th><th>ABC</th><th>Incidencias</th></tr></thead><tbody>{incidentSummary.topPriorityCustomers.map((client) => <tr key={`${client.name}-${client.region}`}><td>{client.name}</td><td>{client.region}</td><td>{client.classification}</td><td>{client.total.toLocaleString("es-PE")}</td></tr>)}</tbody></table></div> : <EmptyChart>No se encontraron clientes de BDCLIENTE vinculados</EmptyChart>}
                 </ChartPanel>
               </div>
 
