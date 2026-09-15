@@ -77,6 +77,7 @@ type MetricRow = {
   statusName: string;
   listName: string;
   direction: string;
+  callCut: string;
   durationSeconds: number;
   leadId: string;
   waitSeconds: number | null;
@@ -499,14 +500,15 @@ const columnAliases = {
   date: ["date", "fecha", "created_at", "createdat", "call_date", "call date", "fecha_creacion", "created"],
   hour: ["hour", "hora", "time", "call_time", "call time", "created_time", "created time"],
   phone: ["phone", "telefono", "teléfono", "mobile", "celular", "number", "phone_number", "phone number", "numero", "número"],
-  user: ["user", "usuario", "agent", "asesor", "owner", "ejecutivo", "username", "user_name", "user name"],
+  user: ["user", "usuario", "agent", "asesor", "nombre del agente", "nombre agente", "owner", "ejecutivo", "username", "user_name", "user name"],
   campaignId: ["campaign_id", "campaign id", "campaign", "campaña", "campana", "id_campana", "id campaña"],
-  statusName: ["status_name", "status name", "estado_nombre", "nombre_estado"],
+  statusName: ["status_name", "status name", "status", "estado", "estado_nombre", "nombre_estado"],
   listName: ["list_name", "list name", "lista", "nombre_lista", "nombre lista"],
-  direction: ["direction", "call_direction", "call direction", "direccion", "dirección"],
-  durationSeconds: ["length_in_sec", "length in sec", "talk_time", "talk time"],
-  leadId: ["lead_id", "lead id"],
-  waitSeconds: ["wait_time", "queue_time", "answer_time", "ring_time", "answer_seconds", "queue_seconds", "time_to_answer"],
+  direction: ["direction", "call_direction", "call direction", "origen de llamada", "origen llamada", "direccion", "dirección"],
+  durationSeconds: ["length_in_sec", "length in sec", "talk_time", "talk time", "tiempo hablado", "tiempo de habla"],
+  leadId: ["lead_id", "lead id", "leadid"],
+  waitSeconds: ["wait_time", "queue_time", "answer_time", "ring_time", "answer_seconds", "queue_seconds", "time_to_answer", "tiempo en espera (cola)", "tiempo espera cola"],
+  callCut: ["corte de llamada", "corte llamada", "call_cut", "call cut", "disposition"],
 };
 
 type EmailMonthPoint = { name: string; received: number; attended: number; withinSla: number; nda: number; nds: number; tmoMinutes: number | null };
@@ -742,6 +744,7 @@ function mapRows(rows: RawRow[]) {
     statusName: findColumn(headers, columnAliases.statusName),
     listName: findColumn(headers, columnAliases.listName),
     direction: findColumn(headers, columnAliases.direction),
+    callCut: findColumn(headers, columnAliases.callCut),
     durationSeconds: findColumn(headers, columnAliases.durationSeconds),
     leadId: findColumn(headers, columnAliases.leadId),
     waitSeconds: findColumn(headers, columnAliases.waitSeconds),
@@ -766,6 +769,7 @@ function mapRows(rows: RawRow[]) {
       statusName: valueAsText(columns.statusName ? row[columns.statusName] : "") || "Sin status_name",
       listName: valueAsText(columns.listName ? row[columns.listName] : "") || "Sin list_name",
       direction: valueAsText(columns.direction ? row[columns.direction] : "") || "Sin direction",
+      callCut: valueAsText(columns.callCut ? row[columns.callCut] : ""),
       durationSeconds: secondsFromValue(columns.durationSeconds ? row[columns.durationSeconds] : ""),
       leadId: valueAsText(columns.leadId ? row[columns.leadId] : ""),
       waitSeconds: columns.waitSeconds ? secondsFromValue(row[columns.waitSeconds]) : null,
@@ -1546,6 +1550,9 @@ function isInboundCall(row: MetricRow) {
 }
 
 function isAttendedCall(row: MetricRow) {
+  // En el nuevo Excel, Corte de llamada es la fuente de verdad:
+  // ABANDON representa una llamada no atendida; AGENT y CALLER son atendidas.
+  if (row.callCut) return normalizeKey(row.callCut) !== "abandon";
   return row.durationSeconds > 0;
 }
 
@@ -1918,14 +1925,14 @@ export default function Home() {
     [monthChartRows, selectedStatusNames, statusFocus],
   );
   const combinedMonthlyCallData = useMemo(() => {
-    if (!apiDailyRows.length) return monthlyCallData;
-    const attendedByMonth = new Map<string, number>();
-    visibleRows.forEach((row) => { const month = row.date.slice(0, 7); if (/^\d{4}-\d{2}$/.test(month)) attendedByMonth.set(month, (attendedByMonth.get(month) ?? 0) + 1); });
-    const abandonedByMonth = new Map<string, number>();
-    const under20ByMonth = new Map<string, number>();
-    apiDailyRows.forEach((row) => { const month = row.fecha.slice(0, 7); if (/^\d{4}-\d{2}$/.test(month)) { abandonedByMonth.set(month, (abandonedByMonth.get(month) ?? 0) + row.abandonadas); under20ByMonth.set(month, (under20ByMonth.get(month) ?? 0) + (row.atendidasMenos20 ?? 0)); } });
-    return Array.from(new Set([...attendedByMonth.keys(), ...abandonedByMonth.keys()])).sort().map((name) => { const attended = attendedByMonth.get(name) ?? 0; const abandoned = abandonedByMonth.get(name) ?? 0; return { name, received: attended + abandoned, attended, abandoned, under20: under20ByMonth.get(name) ?? 0 }; });
-  }, [apiDailyRows, monthlyCallData, visibleRows]);
+    // I1 se alimenta exclusivamente del Excel cargado. La API, si existe,
+    // solo aporta el gráfico opcional de distribución por rangos.
+    return monthlyCallData.map((month) => ({
+      ...month,
+      abandoned: Math.max(0, month.received - month.attended),
+      under20: visibleRows.filter((row) => row.month === month.name && isAttendedCall(row) && row.waitSeconds !== null && row.waitSeconds < 20).length,
+    }));
+  }, [monthlyCallData, visibleRows]);
   const serviceSummary = useMemo(() => buildServiceSummary(visibleRows, selectedStatusNames), [selectedStatusNames, visibleRows]);
   const callMonthComparison = (valueFor: (month: MonthlyCallPoint | ServiceMonthlyPoint) => number | null) => {
     const months = serviceSummary.byMonth.length >= 2 ? serviceSummary.byMonth : monthlyCallData;
@@ -2055,8 +2062,8 @@ export default function Home() {
   const statusFilterLabel = selectedStatusNames.length
     ? `${selectedStatusNames.length} de ${allStatus.length} seleccionados`
     : "Todos los estados";
-  const apiAbandonedTotal = apiDailyRows.reduce((sum, row) => sum + row.abandonadas, 0);
-  const operationalReceivedTotal = apiDailyRows.length ? currentSummary.attendedCalls + apiAbandonedTotal : currentSummary.total;
+  const excelAbandonedTotal = Math.max(0, currentSummary.total - currentSummary.attendedCalls);
+  const operationalReceivedTotal = currentSummary.total;
 
   const chartRefs: Record<ChartKind, RefObject<HTMLDivElement | null>> = {
     date: dateChartRef,
@@ -3730,11 +3737,11 @@ export default function Home() {
       {activeView === "calls" && rows.length ? (
         <>
       <section className={styles.statsGrid} onClick={stopInsideClick}>
-        <StatCard icon={<Hash size={18} />} label="Llamadas recibidas" value={operationalReceivedTotal.toLocaleString("es-PE")} comparison={apiDailyRows.length ? "Atendidas + abandono" : callMonthComparison((month) => month.received)} />
+        <StatCard icon={<Hash size={18} />} label="Llamadas recibidas" value={operationalReceivedTotal.toLocaleString("es-PE")} comparison={callMonthComparison((month) => month.received)} />
         <StatCard icon={<Phone size={18} />} label="Llamadas atendidas" value={currentSummary.attendedCalls.toLocaleString("es-PE")} comparison={callMonthComparison((month) => month.attended)} />
-        <StatCard icon={<Phone size={18} />} label="Abandono" value={(apiDailyRows.length ? apiAbandonedTotal : Math.max(0, currentSummary.total - currentSummary.attendedCalls)).toLocaleString("es-PE")} comparison={apiDailyRows.length ? "Fuente API · data.resumen" : callMonthComparison((month) => percentage(Math.max(0, month.received - month.attended), month.received)) ?? "N/D"} />
-        <StatCard icon={<Phone size={18} />} label="% de abandono" value={formatPercent(percentage(apiDailyRows.length ? apiAbandonedTotal : Math.max(0, currentSummary.total - currentSummary.attendedCalls), operationalReceivedTotal))} comparison={apiDailyRows.length ? "Abandono / (atendidas + abandono)" : "Fuente Excel · recibidas - atendidas"} />
-        <StatCard icon={<UserRound size={18} />} label="Nivel de atención" value={formatPercent(percentage(currentSummary.attendedCalls, operationalReceivedTotal))} comparison={apiDailyRows.length ? "Atendidas / (atendidas + abandono)" : callMonthComparison((month) => percentage(month.attended, month.received))} />
+        <StatCard icon={<Phone size={18} />} label="Abandono" value={excelAbandonedTotal.toLocaleString("es-PE")} comparison={callMonthComparison((month) => Math.max(0, month.received - month.attended)) ?? "N/D"} />
+        <StatCard icon={<Phone size={18} />} label="% de abandono" value={formatPercent(percentage(excelAbandonedTotal, operationalReceivedTotal))} comparison="Abandono / llamadas recibidas" />
+        <StatCard icon={<UserRound size={18} />} label="Nivel de atención" value={formatPercent(percentage(currentSummary.attendedCalls, operationalReceivedTotal))} comparison={callMonthComparison((month) => percentage(month.attended, month.received))} />
         <StatCard icon={<Timer size={18} />} label="TMO promedio" value={formatCallDuration(serviceSummary.averageDurationSeconds)} comparison={callMonthComparison((month) => "averageDurationSeconds" in month ? month.averageDurationSeconds : null)} />
       </section>
 
