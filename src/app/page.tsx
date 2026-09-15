@@ -510,7 +510,7 @@ const columnAliases = {
   direction: ["direction", "call_direction", "call direction", "origen de llamada", "origen llamada", "direccion", "dirección"],
   durationSeconds: ["length_in_sec", "length in sec", "talk_time", "talk time", "tiempo hablado", "tiempo de habla"],
   leadId: ["lead_id", "lead id", "leadid"],
-  waitSeconds: ["wait_time", "queue_time", "answer_time", "ring_time", "answer_seconds", "queue_seconds", "time_to_answer", "tiempo en espera (cola)", "tiempo espera cola"],
+  waitSeconds: ["wait_time", "queue_time", "answer_time", "ring_time", "answer_seconds", "queue_seconds", "time_to_answer", "tiempo en espera (cola)", "tiempo en espera(cola)", "tiempo espera cola"],
   callCut: ["corte de llamada", "corte llamada", "call_cut", "call cut", "disposition"],
 };
 
@@ -2115,7 +2115,12 @@ export default function Home() {
     const savedDashboard = readPersistedDashboard();
     window.setTimeout(() => {
       if (saved) {
-        setRows(saved.rows);
+        // Reprocesa el archivo guardado para reconocer nuevas variantes de encabezados.
+        const canRefresh = saved.rows.every((row) => Object.keys(row.raw ?? {}).length > 0);
+        const refreshedRows = canRefresh
+          ? mapRows(saved.rows.map((row) => row.raw)).filter((row) => isInboundCall(row) && !row.campaignId.toUpperCase().includes("LINDESAC"))
+          : saved.rows;
+        setRows(refreshedRows);
         setFileName(saved.fileName);
       }
       if (savedDashboard) {
