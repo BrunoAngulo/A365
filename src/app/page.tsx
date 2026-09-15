@@ -41,8 +41,6 @@ import { toPng } from "html-to-image";
 import styles from "./page.module.css";
 
 type RawRow = Record<string, unknown>;
-type ApiLevelRow = { range: string; count: number; percentage: number };
-type ApiDailyRow = { fecha: string; recibidas: number; horario: number; atendidas: number; abandonadas: number; nivelAtencion: number; nivelAbandono: number; promedioEspera: number; asesores: number; atendidasMenos20?: number };
 
 declare global {
   interface Window {
