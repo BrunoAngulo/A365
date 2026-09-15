@@ -183,7 +183,6 @@ type ClientProfile = {
   customerName: string;
   classification: string;
   revenue: number;
-  isAffected: boolean;
 };
 
 type ClientImpactPoint = ChartPoint & {
@@ -1427,8 +1426,7 @@ function mapClientProfiles(sheetRows: Row[]): ClientProfile[] {
       const classification = valueAsText(row[offset + 6]).toUpperCase();
       const revenueCell = valueAsText(row[offset + 7]);
       const revenue = revenueFromValue(revenueCell);
-      const isAffected = Boolean(revenueCell.trim()) && revenueCell.replace(/\s+/g, "") !== "-";
-      if (region && customerName) profiles.push({ region, customerName, classification: classification || "Sin clasificación", revenue, isAffected });
+      if (region && customerName) profiles.push({ region, customerName, classification: classification || "Sin clasificación", revenue });
     });
   });
 
@@ -2122,17 +2120,17 @@ export default function Home() {
       const matches = profilesByCustomer.get(normalizeKey(row.customerName)) ?? [];
       const match = [...matches].sort((a, b) => b.revenue - a.revenue)[0];
       return match
-        ? { ...row, customerRegion: match.region, customerClassification: match.classification, customerRevenue: match.revenue, customerAffected: match.isAffected }
+        ? { ...row, customerRegion: match.region, customerClassification: match.classification, customerRevenue: match.revenue, customerAffected: true }
         : row;
     });
   }, [clientProfiles, dateFilteredIncidentRows]);
   const incidentSummary = useMemo(() => buildIncidentSummary(enrichedIncidentRows), [enrichedIncidentRows]);
   const mappedClientCount = useMemo(
-    () => new Set(clientProfiles.map((profile) => `${normalizeKey(profile.region)}|${normalizeKey(profile.customerName)}`)).size,
-    [clientProfiles],
+    () => new Set(incidentRows.filter((row) => row.customerName !== "Sin cliente").map((row) => normalizeKey(row.customerName))).size,
+    [incidentRows],
   );
   const affectedClientCount = useMemo(
-    () => new Set(clientProfiles.filter((profile) => profile.isAffected).map((profile) => `${normalizeKey(profile.region)}|${normalizeKey(profile.customerName)}`)).size,
+    () => new Set(clientProfiles.map((profile) => `${normalizeKey(profile.region)}|${normalizeKey(profile.customerName)}`)).size,
     [clientProfiles],
   );
   const incidentDetailRows = useMemo(() => enrichedIncidentRows.slice(0, detailRowLimit), [enrichedIncidentRows]);
