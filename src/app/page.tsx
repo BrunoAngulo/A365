@@ -1371,7 +1371,8 @@ async function readLegacyWorkbook(file: File): Promise<RawRow[]> {
   const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
   const firstSheet = workbook.Sheets[workbook.SheetNames[0] ?? ""];
   if (!firstSheet) return [];
-  const rows = XLSX.utils.sheet_to_json<unknown[]>(firstSheet, { header: 1, defval: "", raw: true }) as Row[];
+  // raw: false conserva duraciones de Excel como 00:00:15, en vez de su fracción interna de día.
+  const rows = XLSX.utils.sheet_to_json<unknown[]>(firstSheet, { header: 1, defval: "", raw: false }) as Row[];
   return rowsFromSpreadsheet(rows);
 }
 
@@ -1958,7 +1959,7 @@ export default function Home() {
     return monthlyCallData.map((month) => ({
       ...month,
       abandoned: Math.max(0, month.received - month.attended),
-      under20: monthChartRows.filter((row) => row.month === month.name && row.waitSeconds !== null && row.waitSeconds < 20).length,
+      under20: monthChartRows.filter((row) => row.month === month.name && isAttendedCall(row) && row.durationSeconds > 0 && row.durationSeconds < 20).length,
     }));
   }, [monthChartRows, monthlyCallData]);
   const serviceSummary = useMemo(() => buildServiceSummary(visibleRows, selectedStatusNames), [selectedStatusNames, visibleRows]);
@@ -3746,7 +3747,8 @@ export default function Home() {
       <section className={styles.dashboardGrid}>
         <ChartPanel
           title="Llamadas por mes"
-          meta={`${monthlyCallData.length} meses`}
+          meta={`${monthlyCallData.length} meses · <20s según Tiempo hablado`}
+          info="Campos: Fecha, Corte de llamada y Tiempo hablado. La serie Llamadas <20s cuenta llamadas atendidas cuyo Tiempo hablado sea mayor a 0 y menor a 20 segundos."
           comparison={callComparisonBadge("volumen", (month) => month.received)}
           onExpand={() => setExpandedChart("date")}
           onExport={() => void exportChart("date", "Llamadas por mes")}
