@@ -283,7 +283,6 @@ const heatmapStartHour = 7;
 const heatmapEndHour = 23;
 const persistedCallsKey = "a365-i1-calls-v1";
 const persistedDashboardKey = "a365-dashboard-state-v1";
-const persistedBearerKey = "a365-inbound-bearer-v1";
 
 type PersistedCalls = { fileName: string; columns: string[]; rows: MetricRow[] };
 type PersistedDashboardState = {
@@ -1877,11 +1876,6 @@ export default function Home() {
   const [selectedStatusNames, setSelectedStatusNames] = useState<string[]>([]);
   const [statusFocus, setStatusFocus] = useState<string | null>(null);
   const [expandedChart, setExpandedChart] = useState<ChartKind | null>(null);
-  const [apiBearer, setApiBearer] = useState("");
-  const [apiLevelRows, setApiLevelRows] = useState<ApiLevelRow[]>([]);
-  const [apiDailyRows, setApiDailyRows] = useState<ApiDailyRow[]>([]);
-  const [apiLevelsLoading, setApiLevelsLoading] = useState(false);
-  const [apiLevelsError, setApiLevelsError] = useState("");
   const [callStartDate, setCallStartDate] = useState("");
   const [callEndDate, setCallEndDate] = useState("");
   const [activeView, setActiveView] = useState<DashboardView>("calls");
@@ -2110,11 +2104,6 @@ export default function Home() {
     const saved = readPersistedCalls();
     const savedDashboard = readPersistedDashboard();
     window.setTimeout(() => {
-      try {
-        setApiBearer(window.localStorage.getItem(persistedBearerKey) ?? "");
-      } catch {
-        // La consulta sigue disponible si el navegador bloquea el almacenamiento.
-      }
       if (saved) {
         setRows(saved.rows);
         setFileName(saved.fileName);
@@ -3092,16 +3081,6 @@ export default function Home() {
     return null;
   }
 
-  function updateApiBearer(value: string) {
-    setApiBearer(value);
-    try {
-      if (value.trim()) window.localStorage.setItem(persistedBearerKey, value);
-      else window.localStorage.removeItem(persistedBearerKey);
-    } catch {
-      // Mantener el token en memoria permite consultar sin persistencia.
-    }
-  }
-
   async function loadClientDirectoryFile(file: File) {
     setIncidentError("");
     try {
@@ -3117,32 +3096,6 @@ export default function Home() {
   function handleClientDirectoryFiles(files: FileList | null) {
     const file = files?.[0];
     if (file) void loadClientDirectoryFile(file);
-  }
-
-  async function loadApiLevels() {
-    const fileDates = rows.map((row) => row.date).filter((date) => /^\d{4}-\d{2}-\d{2}$/.test(date)).sort();
-    const apiStartDate = callStartDate || fileDates[0] || "";
-    const apiEndDate = callEndDate || fileDates.at(-1) || "";
-    if (!apiBearer.trim() || !apiStartDate || !apiEndDate) { setApiLevelsError("Ingresa el Bearer y carga un archivo con fechas válidas."); return; }
-    setApiLevelsLoading(true); setApiLevelsError("");
-    try {
-      const token = apiBearer.trim().replace(/^Bearer\s+/i, "");
-      const response = await fetch("/api/inbound-levels", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token, startDate: apiStartDate, endDate: apiEndDate }) });
-      const responseText = await response.text();
-      if (!responseText.trim()) throw new Error("La API devolvió una respuesta vacía.");
-      let payload: { rows?: ApiLevelRow[]; daily?: ApiDailyRow[]; error?: string } = {};
-      if (responseText.trim()) {
-        try {
-          payload = JSON.parse(responseText) as typeof payload;
-        } catch {
-          throw new Error("La API devolvió una respuesta no válida.");
-        }
-      }
-      if (!response.ok) throw new Error(payload.error || "No se pudo consultar la API");
-      setApiLevelRows(payload.rows ?? []);
-      setApiDailyRows(payload.daily ?? []);
-    } catch (caught) { setApiLevelsError(caught instanceof Error ? caught.message : "No se pudo consultar la API"); }
-    finally { setApiLevelsLoading(false); }
   }
 
   function submitAccess(event: FormEvent<HTMLFormElement>) {
@@ -3259,8 +3212,6 @@ export default function Home() {
               <label>Hasta<input type="date" value={callEndDate} onChange={(event) => setCallEndDate(event.target.value)} /></label>
               {(callStartDate || callEndDate) ? <button type="button" onClick={() => { setCallStartDate(""); setCallEndDate(""); }}>Limpiar</button> : null}
             </div>
-            <div className={styles.apiLevelsInline}><div><strong>Distribución por rangos</strong><span>Fuente API · token guardado en este navegador</span></div><input type="password" value={apiBearer} onChange={(event) => updateApiBearer(event.target.value)} placeholder="Pegar Bearer token" aria-label="Bearer token de la API" autoComplete="off" /><button className={styles.chartActionButton} type="button" onClick={() => updateApiBearer("")} disabled={!apiBearer}>Borrar token</button><button className={styles.chartActionButton} type="button" onClick={loadApiLevels}>{apiLevelsLoading ? "Consultando..." : "Consultar API"}</button></div>
-            {apiLevelsError ? <strong className={styles.error}>{apiLevelsError}</strong> : null}
           </section>
 
           {error ? <div className={styles.error} onClick={stopInsideClick}>{error}</div> : null}
@@ -3863,7 +3814,6 @@ export default function Home() {
       ) : null}
 
 
-      {activeView === "calls" && rows.length && apiLevelRows.length ? <section className={styles.apiLevelsPanel}><div className={styles.apiLevelsContent}><div className={styles.apiLevelsTable}><table><thead><tr><th>Rango</th><th>Cantidad</th><th>Porcentaje</th></tr></thead><tbody>{apiLevelRows.map((item) => <tr key={item.range}><td>{item.range}</td><td>{item.count.toLocaleString("es-PE")}</td><td>{item.percentage.toFixed(2)}%</td></tr>)}</tbody></table></div><ResponsiveContainer width="100%" height={260}><BarChart data={apiLevelRows} margin={{ left: 12, right: 12 }}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="range" /><YAxis /><Tooltip formatter={(value) => Number(value).toLocaleString("es-PE")} /><Bar dataKey="count" name="Cantidad" fill="#12355b" radius={[5, 5, 0, 0]} /></BarChart></ResponsiveContainer></div>{apiDailyRows.length ? <div className={styles.apiDailyChart}><h3>Abandono por día</h3><span>Fuente: data.resumen · llamadas abandonadas por fecha</span><ResponsiveContainer width="100%" height={280}><BarChart data={apiDailyRows} margin={{ top: 12, right: 12, left: 12, bottom: 36 }}><CartesianGrid strokeDasharray="3 3" /><XAxis dataKey="fecha" angle={-35} textAnchor="end" interval={Math.max(0, Math.ceil(apiDailyRows.length / 12) - 1)} /><YAxis /><Tooltip /><Bar dataKey="abandonadas" name="Abandonadas" fill="#7c3aed" radius={[5, 5, 0, 0]} /></BarChart></ResponsiveContainer></div> : null}</section> : null}
 
       {activeView === "calls" && rows.length && expandedChart ? (
         <div className={styles.modalBackdrop} onClick={() => setExpandedChart(null)} role="presentation">
