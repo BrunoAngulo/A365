@@ -2126,7 +2126,7 @@ export default function Home() {
   }, [clientProfiles, dateFilteredIncidentRows]);
   const incidentSummary = useMemo(() => buildIncidentSummary(enrichedIncidentRows), [enrichedIncidentRows]);
   const mappedClientCount = useMemo(
-    () => new Set(incidentRows.filter((row) => row.customerName !== "Sin cliente").map((row) => normalizeKey(row.customerName))).size,
+    () => incidentRows.filter((row) => row.customerName !== "Sin cliente").length,
     [incidentRows],
   );
   const affectedClientCount = useMemo(
