@@ -1635,7 +1635,7 @@ function buildServiceSummary(rows: MetricRow[], statusNames: string[] = []): Ser
       attended += 1;
       durationSeconds += row.durationSeconds;
 
-      if (row.waitSeconds !== null && row.waitSeconds <= 20) {
+      if (row.waitSeconds !== null && row.waitSeconds < 20) {
         month.attendedUnder20 += 1;
         attendedUnder20 += 1;
       }
@@ -2901,6 +2901,7 @@ export default function Home() {
             <Tooltip formatter={(value) => [formatPercent(Number(value)), "Porcentaje"]} />
             <Legend />
             <Line isAnimationActive={false} type="monotone" dataKey="attentionRate" name="Nivel de atención" stroke="#2563eb" strokeWidth={3} dot={{ r: 4 }} />
+            <Line isAnimationActive={false} type="monotone" dataKey="serviceRate" name="Nivel de servicio" stroke="#f97316" strokeWidth={3} dot={{ r: 4 }} connectNulls />
           </LineChart>
         </ResponsiveContainer>
       </div>
@@ -3799,7 +3800,7 @@ export default function Home() {
 
       <section className={styles.serviceSection} onClick={stopInsideClick}>
         <div className={styles.dashboardGrid}>
-          <ChartPanel title="Nivel de atención por mes" meta="NA: atendidas / recibidas · Meta ≥ 90%" comparison={callComparisonBadge("NA", (month) => percentage(month.attended, month.received))} info="Campos: length_in_sec y call_date. Llamada atendida = length_in_sec > 0. Nivel de Atención (NA) = llamadas atendidas / llamadas recibidas × 100. Meta operativa: NA ≥ 90%.">
+          <ChartPanel title="Nivel de atención y servicio por mes" meta="NA: atendidas / recibidas · NS: atendidas <20s / recibidas" comparison={callComparisonBadge("NA", (month) => percentage(month.attended, month.received))} info="Campos: Corte de llamada, Tiempo en espera (Cola) y Fecha. NA = llamadas atendidas / llamadas recibidas × 100. NS = llamadas atendidas con espera menor a 20 segundos / llamadas recibidas × 100.">
             {renderServiceQualityChart()}
           </ChartPanel>
           <ChartPanel title="TMO por mes" meta="Tiempo medio de operación" comparison={callComparisonBadge("TMO", (month) => "averageDurationSeconds" in month ? month.averageDurationSeconds : null)}>
