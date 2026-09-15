@@ -520,6 +520,8 @@ type MonthlyCallPoint = {
   name: string;
   received: number;
   attended: number;
+  abandoned?: number;
+  under20?: number;
 };
 
 type ServiceMonthlyPoint = {
@@ -2733,7 +2735,7 @@ export default function Home() {
             <Bar isAnimationActive={false} dataKey="attended" name="Llamadas atendidas" fill="#059669" radius={[4, 4, 0, 0]}>
               {combinedMonthlyCallData.map((entry) => <Cell key={`attended-${entry.name}`} fill="#059669" opacity={isDimmed("month", entry.name) ? 0.2 : 1} />)}
             </Bar>
-            {apiDailyRows.length ? <Bar isAnimationActive={false} dataKey="under20" name="<20s" fill="#7c3aed" radius={[4, 4, 0, 0]}>
+            {combinedMonthlyCallData.some((entry) => entry.under20 > 0) ? <Bar isAnimationActive={false} dataKey="under20" name="<20s" fill="#7c3aed" radius={[4, 4, 0, 0]}>
               {combinedMonthlyCallData.map((entry) => <Cell key={`under20-${entry.name}`} fill="#7c3aed" opacity={isDimmed("month", entry.name) ? 0.2 : 1} />)}
             </Bar> : null}
           </BarChart>
