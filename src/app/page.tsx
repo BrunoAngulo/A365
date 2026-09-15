@@ -1127,6 +1127,11 @@ function formatTime(value: Date) {
   return `${String(value.getHours()).padStart(2, "0")}:${String(value.getMinutes()).padStart(2, "0")}`;
 }
 
+function isTimelineReceptionInBusinessHours(date: Date) {
+  const hour = date.getHours();
+  return hour >= 7 && hour < 23;
+}
+
 function timelineDaysFromRows(rows: MatrixRow[]) {
   const days = new Set<string>();
 
@@ -1134,7 +1139,7 @@ function timelineDaysFromRows(rows: MatrixRow[]) {
     const received = parseDateTimeValue(row.dateEmail);
     const registered = parseDateTimeValue(row.fechaRegistro);
 
-    if (!received || !registered || registered < received) {
+    if (!received || !registered || registered < received || !isTimelineReceptionInBusinessHours(received)) {
       return;
     }
 
@@ -1164,7 +1169,7 @@ function buildAgentTimeline(rows: MatrixRow[], day: string): AgentTimeline[] {
     const received = parseDateTimeValue(row.dateEmail);
     const registered = parseDateTimeValue(row.fechaRegistro);
 
-    if (!received || !registered || registered <= received) {
+    if (!received || !registered || registered <= received || !isTimelineReceptionInBusinessHours(received)) {
       return;
     }
 
@@ -2481,7 +2486,7 @@ export default function Home() {
         <div className={styles.panelHeader}>
           <div>
             <h2>Timeline de gestión por agente</h2>
-            <span>Recepción (date_email) → resolución · vista de 24 horas</span>
+            <span>Recepción (date_email) → resolución · se excluyen ingresos de 23:00 a 06:59</span>
           </div>
           {timelineDays.length ? (
             <select
