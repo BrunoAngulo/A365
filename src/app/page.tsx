@@ -2125,14 +2125,6 @@ export default function Home() {
     });
   }, [clientProfiles, dateFilteredIncidentRows]);
   const incidentSummary = useMemo(() => buildIncidentSummary(enrichedIncidentRows), [enrichedIncidentRows]);
-  const mappedClientCount = useMemo(
-    () => incidentRows.filter((row) => row.customerName !== "Sin cliente").length,
-    [incidentRows],
-  );
-  const affectedClientCount = useMemo(
-    () => new Set(clientProfiles.map((profile) => `${normalizeKey(profile.region)}|${normalizeKey(profile.customerName)}`)).size,
-    [clientProfiles],
-  );
   const incidentDetailRows = useMemo(() => enrichedIncidentRows.slice(0, detailRowLimit), [enrichedIncidentRows]);
   const hiddenIncidentRows = Math.max(0, enrichedIncidentRows.length - incidentDetailRows.length);
   const incidentAgentChartHeight = Math.max(280, Math.min(760, incidentSummary.byAgent.length * 38));
@@ -3610,8 +3602,6 @@ export default function Home() {
                 <StatCard icon={<FileSpreadsheet size={18} />} label="Sucursales" value={incidentSummary.uniqueBranches.toLocaleString("es-PE")} />
                 <StatCard icon={<ClipboardList size={18} />} label="Desvíos" value={incidentSummary.proceedsYes.toLocaleString("es-PE")} />
                 <StatCard icon={<ClipboardList size={18} />} label="Refutados" value={incidentSummary.proceedsNo.toLocaleString("es-PE")} />
-                <StatCard icon={<FileSpreadsheet size={18} />} label="Clientes mapeados" value={mappedClientCount.toLocaleString("es-PE")} />
-                <StatCard icon={<Hash size={18} />} label="Clientes afectados" value={affectedClientCount.toLocaleString("es-PE")} />
               </div>
 
               <div className={styles.matrixGrid}>
