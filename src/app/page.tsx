@@ -614,7 +614,18 @@ function valueAsText(value: unknown) {
 }
 
 function secondsFromValue(value: unknown) {
-  const seconds = Number(valueAsText(value).replace(",", "."));
+  const text = valueAsText(value).trim().toLowerCase().replace(",", ".");
+  let seconds = Number(text);
+  if (!Number.isFinite(seconds) && text.includes(":")) {
+    const parts = text.split(":").map(Number);
+    if (parts.every(Number.isFinite)) seconds = parts.length === 2 ? parts[0] * 60 + parts[1] : parts[0] * 3600 + parts[1] * 60 + parts[2];
+  }
+  if (!Number.isFinite(seconds) && /[hms]/.test(text)) {
+    const hours = Number(text.match(/(\d+(?:\.\d+)?)\s*h/)?.[1] ?? 0);
+    const minutes = Number(text.match(/(\d+(?:\.\d+)?)\s*m/)?.[1] ?? 0);
+    const secs = Number(text.match(/(\d+(?:\.\d+)?)\s*s/)?.[1] ?? 0);
+    seconds = hours * 3600 + minutes * 60 + secs;
+  }
   return Number.isFinite(seconds) && seconds >= 0 ? seconds : 0;
 }
 
@@ -1947,9 +1958,9 @@ export default function Home() {
     return monthlyCallData.map((month) => ({
       ...month,
       abandoned: Math.max(0, month.received - month.attended),
-      under20: visibleRows.filter((row) => row.month === month.name && isAttendedCall(row) && row.waitSeconds !== null && row.waitSeconds < 20).length,
+      under20: monthChartRows.filter((row) => row.month === month.name && row.waitSeconds !== null && row.waitSeconds < 20).length,
     }));
-  }, [monthlyCallData, visibleRows]);
+  }, [monthChartRows, monthlyCallData]);
   const serviceSummary = useMemo(() => buildServiceSummary(visibleRows, selectedStatusNames), [selectedStatusNames, visibleRows]);
   const callMonthComparison = (valueFor: (month: MonthlyCallPoint | ServiceMonthlyPoint) => number | null) => {
     const months = serviceSummary.byMonth.length >= 2 ? serviceSummary.byMonth : monthlyCallData;
