@@ -1159,9 +1159,8 @@ function timelineDaysFromRows(rows: MatrixRow[]) {
 
 function buildAgentTimeline(rows: MatrixRow[], day: string): AgentTimeline[] {
   const [year, month, date] = day.split("-").map(Number);
-  const dayStart = new Date(year, month - 1, date);
-  const activeStart = dayStart;
-  const activeEnd = new Date(year, month - 1, date + 1);
+  const activeStart = new Date(year, month - 1, date, 7, 0, 0, 0);
+  const activeEnd = new Date(year, month - 1, date, 23, 0, 0, 0);
   const dayDuration = activeEnd.getTime() - activeStart.getTime();
   const groups = new Map<string, TimelineBlock[]>();
 
@@ -1187,7 +1186,7 @@ function buildAgentTimeline(rows: MatrixRow[], day: string): AgentTimeline[] {
       left: ((start.getTime() - activeStart.getTime()) / dayDuration) * 100,
       width: Math.min(100 - ((start.getTime() - activeStart.getTime()) / dayDuration) * 100, Math.max(0.15, ((end.getTime() - start.getTime()) / dayDuration) * 100)),
       subject: row.subjectEmail,
-      range: `${formatTime(start)} - ${end.getTime() === activeEnd.getTime() ? "24:00" : formatTime(end)}`,
+      range: `${formatTime(start)} - ${end.getTime() === activeEnd.getTime() ? "23:00" : formatTime(end)}`,
       detail: `${row.subjectEmail} | ${row.tipificacion} | ${formatMinutes(row.minutesToRegister)} | ID ${row.idEmail || row.id}`,
       tipificacion: row.tipificacion,
       estado: row.estadoRegistro,
@@ -1216,14 +1215,14 @@ function timelineMarks(scale: TimelineScale) {
   const step = scale === "30m" ? 30 : scale === "1h" ? 60 : 120;
   const marks: string[] = [];
 
-  for (let minute = 0; minute <= 1440; minute += step) {
+  for (let minute = 7 * 60; minute <= 23 * 60; minute += step) {
     const hour = Math.floor(minute / 60);
     const minutes = minute % 60;
     marks.push(`${String(hour).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`);
   }
 
-  if (marks.at(-1) !== "24:00") {
-    marks.push("24:00");
+  if (marks.at(-1) !== "23:00") {
+    marks.push("23:00");
   }
 
   return marks;
@@ -2486,7 +2485,7 @@ export default function Home() {
         <div className={styles.panelHeader}>
           <div>
             <h2>Timeline de gestión por agente</h2>
-            <span>Recepción (date_email) → resolución · se excluyen ingresos de 23:00 a 06:59</span>
+            <span>Recepción (date_email) → resolución · horario visible de 07:00 a 23:00</span>
           </div>
           {timelineDays.length ? (
             <select
