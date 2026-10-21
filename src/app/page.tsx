@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, FormEvent, MouseEvent as ReactMouseEvent, ReactNode, RefObject } from "react";
 import {
   Bar,
@@ -10,8 +10,10 @@ import {
   Line,
   LineChart,
   Legend,
+  LabelList,
   Pie,
   PieChart,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -31,6 +33,7 @@ import {
   ListFilter,
   Mail,
   Maximize2,
+  PackageCheck,
   Phone,
   Timer,
   Upload,
@@ -88,6 +91,16 @@ type ChartPoint = {
   total: number;
 };
 
+type RecoveryAgentPoint = ChartPoint & {
+  recovered: number;
+};
+
+type RecoveryManagementDatePoint = {
+  name: string;
+  managed: number;
+  scheduled: number;
+};
+
 type IncidentMonthPoint = ChartPoint & {
   proceedsYes: number;
   proceedsNo: number;
@@ -97,7 +110,7 @@ type UserPerformancePoint = { name: string; received: number; attended: number; 
 
 type FilterField = "date" | "week" | "month" | "hour" | "statusName" | "campaignId" | "user" | "listName";
 type ChartKind = "date" | "hour" | "status" | "campaign";
-type DashboardView = "calls" | "matrix" | "sales" | "errors" | "performance";
+type DashboardView = "calls" | "matrix" | "sales" | "recovery" | "errors" | "performance";
 type TimelineScale = "30m" | "1h" | "day";
 
 type ChartClickState = {
@@ -183,6 +196,20 @@ type ClientProfile = {
   customerName: string;
   classification: string;
   revenue: number;
+};
+
+type CylinderRecoveryRow = {
+  id: number;
+  advisor: string;
+  customerCode: string;
+  customerName: string;
+  product: string;
+  capacity: string;
+  managementAgent: string;
+  managementDate: string;
+  tipification: string;
+  observations: string;
+  raw: Record<string, string>;
 };
 
 type ClientImpactPoint = ChartPoint & {
@@ -451,6 +478,10 @@ const heatmapHours = Array.from(
 
 type HeatmapCell = { day: string; hour: number; value: number; count: number };
 
+function heatmapCellKey(day: string, hour: number) {
+  return `${day}-${hour}`;
+}
+
 function heatmapDayIndex(value: string) {
   const date = parseDateTimeValue(value);
   if (!date) return null;
@@ -496,7 +527,7 @@ function buildEmailHeatmap(rows: MatrixRow[]) {
   }));
 }
 
-function HeatmapGrid({ cells, formatter }: { cells: HeatmapCell[]; formatter: (value: number) => string }) {
+function HeatmapGrid({ cells, formatter, detailFormatter }: { cells: HeatmapCell[]; formatter: (value: number) => string; detailFormatter?: (cell: HeatmapCell) => string }) {
   const max = Math.max(...cells.map((cell) => cell.value), 0);
   return (
     <div className={styles.heatmapWrap}>
@@ -510,7 +541,8 @@ function HeatmapGrid({ cells, formatter }: { cells: HeatmapCell[]; formatter: (v
             const ratio = max ? cell.value / max : 0;
             const rgb = ratio >= 0.66 ? "67, 56, 202" : ratio >= 0.33 ? "37, 99, 235" : "6, 182, 212";
             const style = { "--heatmap-alpha": intensity, "--heatmap-value": cell.value, backgroundColor: `rgba(${rgb}, ${0.2 + ratio * 0.8})` } as CSSProperties;
-            return <div key={`${cell.day}-${cell.hour}`} className={styles.heatmapCell} style={{ ...style, color: ratio >= 0.33 ? "#ffffff" : "#0f172a" }} title={`${cell.day} ${String(cell.hour).padStart(2, "0")}:00 · ${formatter(cell.value)}`}><span>{cell.value.toLocaleString("es-PE")}</span></div>;
+            const detail = detailFormatter?.(cell);
+            return <div key={`${cell.day}-${cell.hour}`} className={styles.heatmapCell} style={{ ...style, color: ratio >= 0.33 ? "#ffffff" : "#0f172a" }} title={`${cell.day} ${String(cell.hour).padStart(2, "0")}:00 · ${formatter(cell.value)}${detail ? `\n${detail}` : ""}`}><span>{cell.value.toLocaleString("es-PE")}</span></div>;
           }),
         ])}
       </div>
@@ -538,6 +570,7 @@ type EmailMonthPoint = { name: string; received: number; attended: number; withi
 type EmailSummary = { received: number; attended: number; withinSla: number; nda: number; nds: number; tmoMinutes: number | null; byMonth: EmailMonthPoint[]; byUser: ChartPoint[]; byTipificacion: ChartPoint[]; byMotivo: ChartPoint[]; byHour: ChartPoint[]; period: string };
 
 const EMAIL_SLA_MINUTES = 60;
+const SLOW_RESOLUTION_MINUTES = 45;
 
 type MonthlyCallPoint = {
   name: string;
@@ -596,6 +629,18 @@ const incidentColumnAliases = {
   detail: ["detalle de la incidencia", "breve explicacion", "breve explicación", "detalle"],
   impact: ["impacto"],
   proceeds: ["procede", "procede?"],
+};
+
+const recoveryColumnAliases = {
+  advisor: ["asesor"],
+  customerCode: ["cod cliente", "codigo cliente", "código cliente"],
+  customerName: ["razon social", "razón social"],
+  product: ["producto"],
+  capacity: ["capacidad"],
+  managementAgent: ["agente que realiza gestion", "agente que realiza gestión"],
+  managementDate: ["fecha de gestion", "fecha de gestión"],
+  tipification: ["tipificacion", "tipificación"],
+  observations: ["observaciones o comentarios"],
 };
 
 function normalizeKey(value: string) {
@@ -870,12 +915,13 @@ function parseDelimitedText(text: string) {
     );
 }
 
-function rowsFromSpreadsheet(sheetRows: Row[]) {
-  const headers = (sheetRows.shift() ?? []).map((header, index) =>
+function rowsFromSpreadsheet(sheetRows: Row[], skipRows = 0) {
+  const reportRows = sheetRows.slice(skipRows);
+  const headers = (reportRows.shift() ?? []).map((header, index) =>
     valueAsText(header) || `columna_${index + 1}`,
   );
 
-  return sheetRows
+  return reportRows
     .filter((line) => line.some((cell) => valueAsText(cell)))
     .map((line) =>
       headers.reduce<RawRow>((record, header, index) => {
@@ -911,7 +957,7 @@ function monthForGrouping(value: string) {
   return date === "Sin fecha" ? "Sin mes" : date.slice(0, 7);
 }
 
-function parseHtmlTableRows(text: string) {
+function parseHtmlTableRows(text: string, skipRows = 0) {
   if (typeof DOMParser === "undefined" || !/<table[\s>]/i.test(text)) {
     return [];
   }
@@ -925,7 +971,7 @@ function parseHtmlTableRows(text: string) {
 
   const lines = Array.from(table.querySelectorAll("tr")).map((tr) =>
     Array.from(tr.querySelectorAll("th,td")).map((cell) => cell.textContent?.trim() ?? ""),
-  );
+  ).slice(skipRows);
   const headers = lines.shift()?.map((header, index) => header || `columna_${index + 1}`) ?? [];
 
   return lines
@@ -1108,6 +1154,61 @@ function mapMatrixRows(rows: RawRow[]) {
       }, {}),
     };
   });
+}
+
+function mapCylinderRecoveryRows(rows: RawRow[]) {
+  if (!rows.length) return [];
+
+  const headers = Object.keys(rows[0]);
+  const columns = {
+    advisor: findColumn(headers, recoveryColumnAliases.advisor),
+    customerCode: findColumn(headers, recoveryColumnAliases.customerCode),
+    customerName: findColumn(headers, recoveryColumnAliases.customerName),
+    product: findColumn(headers, recoveryColumnAliases.product),
+    capacity: findColumn(headers, recoveryColumnAliases.capacity),
+    managementAgent: findColumn(headers, recoveryColumnAliases.managementAgent),
+    managementDate: findColumn(headers, recoveryColumnAliases.managementDate),
+    tipification: findColumn(headers, recoveryColumnAliases.tipification),
+    observations: findColumn(headers, recoveryColumnAliases.observations),
+  };
+
+  return rows.map((row, index) => ({
+    id: index + 1,
+    advisor: valueAsText(columns.advisor ? row[columns.advisor] : "") || "Sin asesor",
+    customerCode: valueAsText(columns.customerCode ? row[columns.customerCode] : "") || "Sin código",
+    customerName: valueAsText(columns.customerName ? row[columns.customerName] : "") || "Sin razón social",
+    product: valueAsText(columns.product ? row[columns.product] : "") || "Sin producto",
+    capacity: valueAsText(columns.capacity ? row[columns.capacity] : "") || "Sin capacidad",
+    managementAgent: valueAsText(columns.managementAgent ? row[columns.managementAgent] : "") || "Pendiente de gestión",
+    managementDate: valueAsText(columns.managementDate ? row[columns.managementDate] : ""),
+    tipification: valueAsText(columns.tipification ? row[columns.tipification] : ""),
+    observations: valueAsText(columns.observations ? row[columns.observations] : ""),
+    raw: headers.reduce<Record<string, string>>((record, header) => {
+      record[header] = valueAsText(row[header]);
+      return record;
+    }, {}),
+  }));
+}
+
+function recoveryPoints(rows: CylinderRecoveryRow[], key: keyof Pick<CylinderRecoveryRow, "advisor" | "customerName" | "product" | "capacity" | "managementAgent">) {
+  const counts = new Map<string, number>();
+  rows.forEach((row) => addToCount(counts, row[key]));
+  return pointsFromMap(counts);
+}
+
+function recoveryManagementAgentPoints(rows: CylinderRecoveryRow[]) {
+  const agents = new Map<string, RecoveryAgentPoint>();
+  rows.forEach((row) => {
+    const name = row.managementAgent || "Pendiente de gestión";
+    const key = normalizeKey(name);
+    const current = agents.get(key);
+    agents.set(key, {
+      name: current?.name ?? name,
+      total: (current?.total ?? 0) + 1,
+      recovered: (current?.recovered ?? 0) + (normalizeKey(row.tipification) === "programacion recojo cilindro" ? 1 : 0),
+    });
+  });
+  return Array.from(agents.values()).sort((a, b) => b.total - a.total);
 }
 
 function countMatrixBy(rows: MatrixRow[], key: keyof MatrixRow) {
@@ -1394,14 +1495,14 @@ function countIncidentsBy(rows: IncidentRow[], key: keyof IncidentRow, sortBy: "
   return sortBy === "name" ? points.sort((a, b) => a.name.localeCompare(b.name)) : points.sort((a, b) => b.total - a.total);
 }
 
-async function readLegacyWorkbook(file: File): Promise<RawRow[]> {
+async function readLegacyWorkbook(file: File, skipRows = 0): Promise<RawRow[]> {
   const buffer = await file.arrayBuffer();
   const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
   const firstSheet = workbook.Sheets[workbook.SheetNames[0] ?? ""];
   if (!firstSheet) return [];
   // raw: false conserva duraciones de Excel como 00:00:15, en vez de su fracción interna de día.
   const rows = XLSX.utils.sheet_to_json<unknown[]>(firstSheet, { header: 1, defval: "", raw: false }) as Row[];
-  return rowsFromSpreadsheet(rows);
+  return rowsFromSpreadsheet(rows, skipRows);
 }
 
 function revenueFromValue(value: unknown) {
@@ -1927,6 +2028,7 @@ function ChartPanel({
 
 export default function Home() {
   const inputRef = useRef<HTMLInputElement>(null);
+  const recoveryInputRef = useRef<HTMLInputElement>(null);
   const incidentInputRef = useRef<HTMLInputElement>(null);
   const matrixInputRef = useRef<HTMLInputElement>(null);
   const dateChartRef = useRef<HTMLDivElement>(null);
@@ -1943,6 +2045,13 @@ export default function Home() {
   const [expandedChart, setExpandedChart] = useState<ChartKind | null>(null);
   const [callStartDate, setCallStartDate] = useState("");
   const [callEndDate, setCallEndDate] = useState("");
+  const [callReportStartDate, setCallReportStartDate] = useState(todayInputValue);
+  const [callReportEndDate, setCallReportEndDate] = useState(todayInputValue);
+  const [callReportSessionId, setCallReportSessionId] = useState("");
+  const [callReportError, setCallReportError] = useState("");
+  const [inboundReportFile, setInboundReportFile] = useState<Blob | null>(null);
+  const [isDownloadingCallReport, setIsDownloadingCallReport] = useState(false);
+  const [callAutoRefreshEnabled, setCallAutoRefreshEnabled] = useState(false);
   const [activeView, setActiveView] = useState<DashboardView>("calls");
   const [reportStartDate, setReportStartDate] = useState(todayInputValue);
   const [reportEndDate, setReportEndDate] = useState(todayInputValue);
@@ -1961,6 +2070,7 @@ export default function Home() {
   const [persistenceReady, setPersistenceReady] = useState(false);
   const [matrixDayDetail, setMatrixDayDetail] = useState<string | null>(null);
   const [matrixUserFocus, setMatrixUserFocus] = useState<string | null>(null);
+  const [matrixStatusFocus, setMatrixStatusFocus] = useState<string | null>(null);
   const [hoveredTimelineId, setHoveredTimelineId] = useState<string | null>(null);
   const [incidentRows, setIncidentRows] = useState<IncidentRow[]>([]);
   const [incidentColumns, setIncidentColumns] = useState<string[]>([]);
@@ -1976,6 +2086,15 @@ export default function Home() {
   const [salesTab, setSalesTab] = useState<SalesTab>("summary");
   const [salesFilters, setSalesFilters] = useState<Record<string, string>>({});
   const [salesCompareRegions, setSalesCompareRegions] = useState(false);
+  const [recoveryRows, setRecoveryRows] = useState<CylinderRecoveryRow[]>([]);
+  const [recoveryFileName, setRecoveryFileName] = useState("Sin archivo cargado");
+  const [recoveryError, setRecoveryError] = useState("");
+  const [recoveryStartDate, setRecoveryStartDate] = useState("");
+  const [recoveryEndDate, setRecoveryEndDate] = useState("");
+  const [recoveryManagementAgent, setRecoveryManagementAgent] = useState("");
+  const [recoveryAdvisorFocus, setRecoveryAdvisorFocus] = useState<string | null>(null);
+  const [recoveryCustomerFocus, setRecoveryCustomerFocus] = useState<string | null>(null);
+  const [recoveryProductFocus, setRecoveryProductFocus] = useState<string | null>(null);
   const [accessChecked, setAccessChecked] = useState(false);
   const [accessGranted, setAccessGranted] = useState(false);
   const [accessPassword, setAccessPassword] = useState("");
@@ -2041,7 +2160,7 @@ export default function Home() {
   const byCampaign = campaignChartSummary.byCampaign;
   const callHeatmap = useMemo(() => buildCallHeatmap(visibleRows), [visibleRows]);
   const slowResolutionRows = useMemo(
-    () => matrixRows.filter((row) => row.minutesToRegister !== null && row.minutesToRegister > 20),
+    () => matrixRows.filter((row) => row.minutesToRegister !== null && row.minutesToRegister > SLOW_RESOLUTION_MINUTES),
     [matrixRows],
   );
   const visibleMatrixRows = showSlowResolutionOnly ? slowResolutionRows : matrixRows;
@@ -2082,9 +2201,34 @@ export default function Home() {
     [emailHourChronological, emailSummary.byHour],
   );
   const emailHeatmap = useMemo(() => buildEmailHeatmap(visibleMatrixRows), [visibleMatrixRows]);
+  const emailTipificationsByHeatmapCell = useMemo(() => {
+    const groups = new Map<string, Map<string, number>>();
+
+    visibleMatrixRows.forEach((row) => {
+      const date = parseDateTimeValue(row.dateEmail);
+      if (!date) return;
+      const dayIndex = heatmapDayIndex(row.dateEmail);
+      const hour = date.getHours();
+      if (dayIndex === null || hour < heatmapStartHour || hour > heatmapEndHour) return;
+
+      const key = heatmapCellKey(heatmapDays[dayIndex], hour);
+      const tipificacion = row.tipificacion || "Sin tipificación";
+      const counts = groups.get(key) ?? new Map<string, number>();
+      counts.set(tipificacion, (counts.get(tipificacion) ?? 0) + 1);
+      groups.set(key, counts);
+    });
+
+    return new Map(Array.from(groups.entries()).map(([key, counts]) => [
+      key,
+      `Por tipificación: ${Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "es")).map(([name, total]) => `${name}: ${total}`).join(" · ")}`,
+    ]));
+  }, [visibleMatrixRows]);
   const filteredMatrixRows = useMemo(
-    () => matrixUserFocus ? visibleMatrixRows.filter((row) => normalizeKey(row.usuarioAsignado) === normalizeKey(matrixUserFocus)) : visibleMatrixRows,
-    [matrixUserFocus, visibleMatrixRows],
+    () => visibleMatrixRows.filter((row) =>
+      (!matrixUserFocus || normalizeKey(row.usuarioAsignado) === normalizeKey(matrixUserFocus)) &&
+      (!matrixStatusFocus || normalizeKey(row.estadoRegistro) === normalizeKey(matrixStatusFocus)),
+    ),
+    [matrixStatusFocus, matrixUserFocus, visibleMatrixRows],
   );
   const matrixDetailRows = useMemo(() => filteredMatrixRows.slice(0, detailRowLimit), [filteredMatrixRows]);
   const matrixTipificacionIndicators = useMemo(
@@ -2151,6 +2295,80 @@ export default function Home() {
   const salesClients = useMemo(() => salesGrouped(salesFilteredRows, "clientName").slice(0, 5), [salesFilteredRows]);
   const salesFrequency = useMemo(() => salesPurchaseFrequency(salesFilteredRows), [salesFilteredRows]);
   const salesIndustries = useMemo(() => salesGrouped(salesFilteredRows, "industry").slice(0, 10).map((point) => ({ ...point, name: salesDisplayName(point.name) })), [salesFilteredRows]);
+  const recoveryFilteredRows = useMemo(
+    () => recoveryRows.filter((row) => {
+      const date = dateKeyFromDateTime(row.managementDate);
+      return (!recoveryStartDate || (date !== "Sin fecha" && date >= recoveryStartDate)) &&
+        (!recoveryEndDate || (date !== "Sin fecha" && date <= recoveryEndDate)) &&
+        (!recoveryManagementAgent || row.managementAgent === recoveryManagementAgent);
+    }),
+    [recoveryEndDate, recoveryManagementAgent, recoveryRows, recoveryStartDate],
+  );
+  const recoveryManagementAgents = useMemo(
+    () => Array.from(new Set(recoveryRows.map((row) => row.managementAgent).filter((value) => value !== "Pendiente de gestión"))).sort((a, b) => a.localeCompare(b, "es")),
+    [recoveryRows],
+  );
+  const recoveryOxygenRows = useMemo(
+    () => recoveryFilteredRows.filter((row) => normalizeKey(row.product).includes("oxigeno")),
+    [recoveryFilteredRows],
+  );
+  const recoveryByAdvisor = useMemo(() => recoveryPoints(recoveryFilteredRows, "advisor"), [recoveryFilteredRows]);
+  const recoveryCustomerRows = useMemo(
+    () => recoveryAdvisorFocus ? recoveryFilteredRows.filter((row) => row.advisor === recoveryAdvisorFocus) : recoveryFilteredRows,
+    [recoveryAdvisorFocus, recoveryFilteredRows],
+  );
+  const recoveryByCustomer = useMemo(() => {
+    const counts = new Map<string, number>();
+    recoveryCustomerRows.forEach((row) => addToCount(counts, `${row.customerCode} · ${row.customerName}`));
+    return pointsFromMap(counts).slice(0, 20);
+  }, [recoveryCustomerRows]);
+  const recoveryProductRows = useMemo(
+    () => recoveryCustomerFocus
+      ? recoveryCustomerRows.filter((row) => `${row.customerCode} · ${row.customerName}` === recoveryCustomerFocus)
+      : recoveryCustomerRows,
+    [recoveryCustomerFocus, recoveryCustomerRows],
+  );
+  const recoveryByProduct = useMemo(() => recoveryPoints(recoveryProductRows, "product").slice(0, 12), [recoveryProductRows]);
+  const recoveryCapacityRows = useMemo(
+    () => recoveryProductFocus
+      ? recoveryProductRows.filter((row) => row.product === recoveryProductFocus)
+      : recoveryCustomerFocus
+        ? recoveryProductRows
+        : recoveryOxygenRows,
+    [recoveryCustomerFocus, recoveryOxygenRows, recoveryProductFocus, recoveryProductRows],
+  );
+  const recoveryOxygenByCapacity = useMemo(() => recoveryPoints(recoveryCapacityRows, "capacity"), [recoveryCapacityRows]);
+  const recoveryByManagementAgent = useMemo(() => recoveryManagementAgentPoints(recoveryFilteredRows).slice(0, 12), [recoveryFilteredRows]);
+  const recoveryByManagementDate = useMemo(() => {
+    const counts = new Map<string, { managed: number; scheduled: number }>();
+    recoveryFilteredRows.forEach((row) => {
+      const date = dateKeyFromDateTime(row.managementDate);
+      if (date === "Sin fecha") return;
+      const current = counts.get(date) ?? { managed: 0, scheduled: 0 };
+      counts.set(date, {
+        managed: current.managed + 1,
+        scheduled: current.scheduled + (normalizeKey(row.tipification) === "programacion recojo cilindro" ? 1 : 0),
+      });
+    });
+    return Array.from(counts.entries())
+      .sort(([firstDate], [secondDate]) => firstDate.localeCompare(secondDate))
+      .map(([date, values]) => {
+        const [, month, day] = date.split("-");
+        return { name: `${day}/${month}`, ...values };
+      });
+  }, [recoveryFilteredRows]);
+  const recoveryDetailRows = useMemo(() => recoveryFilteredRows.slice(0, detailRowLimit), [recoveryFilteredRows]);
+  const recoveryHiddenRows = Math.max(0, recoveryFilteredRows.length - recoveryDetailRows.length);
+  const recoveryCustomers = useMemo(() => new Set(recoveryFilteredRows.map((row) => row.customerCode).filter((value) => value !== "Sin código")).size, [recoveryFilteredRows]);
+  const recoveryManagedRows = useMemo(() => recoveryFilteredRows.filter((row) => row.managementDate).length, [recoveryFilteredRows]);
+  const recoveryManagedCustomers = useMemo(
+    () => new Set(recoveryFilteredRows.filter((row) => row.managementAgent !== "Pendiente de gestión").map((row) => row.customerCode).filter((value) => value !== "Sin código")).size,
+    [recoveryFilteredRows],
+  );
+  const recoveredCylinders = useMemo(
+    () => recoveryFilteredRows.filter((row) => normalizeKey(row.tipification) === "programacion recojo cilindro").length,
+    [recoveryFilteredRows],
+  );
   const statusTotal = statusChartSummary.total;
   const statusColorFor = (name: string) => chartColor(Math.max(0, allStatusChartData.findIndex((item) => item.name === name)));
   const statusFilterLabel = selectedStatusNames.length
@@ -2196,11 +2414,17 @@ export default function Home() {
         if (savedDashboard.dashboardFocus) setDashboardFocus(savedDashboard.dashboardFocus);
         if (Array.isArray(savedDashboard.selectedStatusNames)) setSelectedStatusNames(savedDashboard.selectedStatusNames);
         if (typeof savedDashboard.statusFocus === "string" || savedDashboard.statusFocus === null) setStatusFocus(savedDashboard.statusFocus);
-        if (typeof savedDashboard.callStartDate === "string") setCallStartDate(savedDashboard.callStartDate);
-        if (typeof savedDashboard.callEndDate === "string") setCallEndDate(savedDashboard.callEndDate);
+        if (typeof savedDashboard.callStartDate === "string") {
+          setCallStartDate(savedDashboard.callStartDate);
+          if (savedDashboard.callStartDate) setCallReportStartDate(savedDashboard.callStartDate);
+        }
+        if (typeof savedDashboard.callEndDate === "string") {
+          setCallEndDate(savedDashboard.callEndDate);
+          if (savedDashboard.callEndDate) setCallReportEndDate(savedDashboard.callEndDate);
+        }
         if (typeof savedDashboard.incidentStartDate === "string") setIncidentStartDate(savedDashboard.incidentStartDate);
         if (typeof savedDashboard.incidentEndDate === "string") setIncidentEndDate(savedDashboard.incidentEndDate);
-        if (savedDashboard.activeView === "calls" || savedDashboard.activeView === "matrix" || savedDashboard.activeView === "sales" || savedDashboard.activeView === "errors" || savedDashboard.activeView === "performance") setActiveView(savedDashboard.activeView);
+        if (savedDashboard.activeView === "calls" || savedDashboard.activeView === "matrix" || savedDashboard.activeView === "sales" || savedDashboard.activeView === "recovery" || savedDashboard.activeView === "errors" || savedDashboard.activeView === "performance") setActiveView(savedDashboard.activeView);
         if (typeof savedDashboard.timelineDay === "string") setTimelineDay(savedDashboard.timelineDay);
         if (savedDashboard.timelineScale === "30m" || savedDashboard.timelineScale === "1h" || savedDashboard.timelineScale === "day") setTimelineScale(savedDashboard.timelineScale);
         if (typeof savedDashboard.showSlowResolutionOnly === "boolean") setShowSlowResolutionOnly(savedDashboard.showSlowResolutionOnly);
@@ -2323,6 +2547,7 @@ export default function Home() {
   async function loadFile(file: File) {
     setError("");
     setFileName(file.name);
+    setInboundReportFile(null);
 
     try {
       const extension = file.name.split(".").pop()?.toLowerCase();
@@ -2344,6 +2569,19 @@ export default function Home() {
       }
 
       setRows(mappedRows);
+      const fileDates = mappedRows.map((row) => row.date).filter((date) => date !== "Sin fecha").sort((first, second) => first.localeCompare(second));
+      if (fileDates.length) {
+        const firstDate = fileDates[0];
+        const lastDate = fileDates[fileDates.length - 1];
+        setCallStartDate(firstDate);
+        setCallEndDate(lastDate);
+        setCallReportStartDate(firstDate);
+        setCallReportEndDate(lastDate);
+      } else {
+        setCallStartDate("");
+        setCallEndDate("");
+      }
+      setCallAutoRefreshEnabled(false);
       setSelectedStatusNames([]);
       try {
         window.localStorage.setItem(persistedCallsKey, JSON.stringify({ fileName: file.name, columns: Object.keys(rawRows[0] ?? {}), rows: mappedRows }));
@@ -2361,6 +2599,143 @@ export default function Home() {
       void loadFile(file);
     }
   }
+
+  async function loadRecoveryFile(file: File) {
+    setRecoveryError("");
+    setRecoveryFileName(file.name);
+
+    try {
+      let sheetRows: Row[];
+      try {
+        sheetRows = await readSheet(file, "BD OCT26");
+      } catch {
+        throw new Error('No encontré la hoja "BD OCT26". Carga el archivo de recuperación de cilindros con esa hoja.');
+      }
+
+      const mappedRows = mapCylinderRecoveryRows(rowsFromSpreadsheet(sheetRows));
+      if (!mappedRows.length) {
+        throw new Error("La hoja BD OCT26 no contiene registros de cilindros.");
+      }
+
+      setRecoveryRows(mappedRows);
+      setRecoveryStartDate("");
+      setRecoveryEndDate("");
+      setRecoveryManagementAgent("");
+      setRecoveryAdvisorFocus(null);
+      setRecoveryCustomerFocus(null);
+      setRecoveryProductFocus(null);
+    } catch (currentError) {
+      setRecoveryRows([]);
+      setRecoveryError(currentError instanceof Error ? currentError.message : "No pude leer el archivo de recuperación.");
+    }
+  }
+
+  function handleRecoveryFiles(files: FileList | null) {
+    const file = files?.[0];
+    if (file) void loadRecoveryFile(file);
+  }
+
+  const downloadInboundSourceFile = useCallback((blob: Blob) => {
+    const link = document.createElement("a");
+    const objectUrl = URL.createObjectURL(blob);
+    link.href = objectUrl;
+    link.download = `reporte-inbound-${callReportStartDate}-${callReportEndDate}.xls`;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+  }, [callReportEndDate, callReportStartDate]);
+
+  const downloadInboundCallsReport = useCallback(async () => {
+    setCallReportError("");
+    setError("");
+    setIsDownloadingCallReport(true);
+
+    try {
+      const response = await fetch("/api/inbound-calls-report", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          startDate: callReportStartDate,
+          endDate: callReportEndDate,
+          sessionId: callReportSessionId,
+        }),
+      });
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error ?? "No pude descargar el reporte inbound.");
+      }
+
+      const reportBlob = await response.blob();
+      setInboundReportFile(reportBlob);
+      const file = new File(
+        [reportBlob],
+        `reporte-inbound-${callReportStartDate}-${callReportEndDate}.xls`,
+        { type: "application/vnd.ms-excel" },
+      );
+      let rawRows: RawRow[] = [];
+      try {
+        rawRows = await readLegacyWorkbook(file, 2);
+      } catch {
+        // Si A365 entrega una tabla HTML con extensión .xls, se procesa abajo.
+      }
+      const htmlRows = parseHtmlTableRows(await reportBlob.text(), 2);
+      if (htmlRows.length) rawRows = htmlRows;
+
+      const mappedRows = mapRows(rawRows).filter(
+        (row) => isInboundCall(row) && !row.campaignId.toUpperCase().includes("LINDESAC"),
+      );
+      if (!mappedRows.length) {
+        downloadInboundSourceFile(reportBlob);
+        throw new Error("No encontré llamadas inbound válidas. Descargué el archivo original para que puedas revisarlo en Excel.");
+      }
+
+      setRows(mappedRows);
+      setFileName(`A365 inbound · ${callReportStartDate} a ${callReportEndDate}`);
+      const reportDates = mappedRows.map((row) => row.date).filter((date) => date !== "Sin fecha").sort((first, second) => first.localeCompare(second));
+      if (reportDates.length) {
+        const firstDate = reportDates[0];
+        const lastDate = reportDates[reportDates.length - 1];
+        setCallStartDate(firstDate);
+        setCallEndDate(lastDate);
+        setCallReportStartDate(firstDate);
+        setCallReportEndDate(lastDate);
+      } else {
+        setCallStartDate("");
+        setCallEndDate("");
+      }
+      setSelectedStatusNames([]);
+      setDashboardFocus({});
+      setCallAutoRefreshEnabled(true);
+      try {
+        window.localStorage.setItem(persistedCallsKey, JSON.stringify({
+          fileName: `A365 inbound · ${callReportStartDate} a ${callReportEndDate}`,
+          columns: Object.keys(rawRows[0] ?? {}),
+          rows: mappedRows,
+        }));
+      } catch {
+        // Mantiene la carga actual aunque el reporte exceda la cuota local.
+      }
+    } catch (currentError) {
+      setCallReportError(currentError instanceof Error ? currentError.message : "No pude cargar el reporte inbound.");
+      setCallAutoRefreshEnabled(false);
+    } finally {
+      setIsDownloadingCallReport(false);
+    }
+  }, [callReportEndDate, callReportSessionId, callReportStartDate, downloadInboundSourceFile]);
+
+  async function loadInboundCallsReport(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await downloadInboundCallsReport();
+  }
+
+  useEffect(() => {
+    if (!callAutoRefreshEnabled || !callReportSessionId || isDownloadingCallReport) return;
+
+    const refreshTimer = window.setInterval(() => {
+      void downloadInboundCallsReport();
+    }, 180_000);
+
+    return () => window.clearInterval(refreshTimer);
+  }, [callAutoRefreshEnabled, callReportSessionId, downloadInboundCallsReport, isDownloadingCallReport]);
 
   async function loadIncidentFile(file: File) {
     setIncidentError("");
@@ -2415,7 +2790,7 @@ export default function Home() {
     }
   }
 
-  function renderMatrixBarChart(data: ChartPoint[], color: string, height = 280) {
+  function renderMatrixBarChart(data: ChartPoint[], color: string, height = 280, onPointClick?: (name: string) => void, focusedName?: string | null) {
     return data.length ? (
       <div className={styles.chartShell}>
         <ResponsiveContainer width="100%" height={height}>
@@ -2424,13 +2799,34 @@ export default function Home() {
             <XAxis dataKey="name" tick={{ fontSize: 12 }} />
             <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
             <Tooltip />
-            <Bar dataKey="total" name="Registros" fill={color} radius={[4, 4, 0, 0]} />
+            <Bar dataKey="total" name="Registros" fill={color} radius={[4, 4, 0, 0]} onClick={onPointClick ? (entry) => { const value = matrixUserNameFromChartEntry(entry); if (value) onPointClick(value); } : undefined}>
+              {data.map((entry) => <Cell key={entry.name} fill={color} opacity={focusedName && normalizeKey(focusedName) !== normalizeKey(entry.name) ? 0.2 : 1} />)}
+            </Bar>
           </BarChart>
         </ResponsiveContainer>
       </div>
     ) : (
       <EmptyChart>Sin datos para graficar</EmptyChart>
     );
+  }
+
+  function renderRecoveryRankingChart(data: ChartPoint[], color: string, onPointClick?: (name: string) => void, focusedName?: string | null) {
+    const height = Math.max(280, Math.min(620, data.length * 42));
+    return data.length ? (
+      <div className={styles.scrollChart}>
+        <ResponsiveContainer width="100%" height={height}>
+          <BarChart data={data} layout="vertical" margin={{ left: 16, right: 24, top: 8, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#dce5f0" />
+            <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} />
+            <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={160} />
+            <Tooltip />
+            <Bar dataKey="total" name="Cilindros" fill={color} radius={[0, 4, 4, 0]} onClick={onPointClick ? (entry) => { const value = matrixUserNameFromChartEntry(entry); if (value) onPointClick(value); } : undefined}>
+              {data.map((entry) => <Cell key={entry.name} fill={color} opacity={focusedName && normalizeKey(focusedName) !== normalizeKey(entry.name) ? 0.25 : 1} />)}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    ) : <EmptyChart>Sin datos para graficar</EmptyChart>;
   }
 
   function renderMatrixTimeChart(data: TimeAveragePoint[], height = Math.max(280, Math.min(720, data.length * 42)), onPointClick?: (name: string) => void) {
@@ -2463,6 +2859,69 @@ export default function Home() {
       </div>
     ) : (
       <EmptyChart>Sin tiempos para graficar</EmptyChart>
+    );
+  }
+
+  function renderRecoveryAgentChart(data: RecoveryAgentPoint[]) {
+    const height = Math.max(280, Math.min(620, data.length * 46));
+    return data.length ? (
+      <div className={styles.scrollChart}>
+        <ResponsiveContainer width="100%" height={height}>
+          <BarChart data={data} layout="vertical" margin={{ left: 16, right: 24, top: 8, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#dce5f0" />
+            <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} />
+            <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={128} />
+            <Tooltip />
+            <Legend />
+            <Bar dataKey="total" name="Gestiones" fill="#14b8a6" radius={[0, 4, 4, 0]} />
+            <Bar dataKey="recovered" name="Cilindros recuperados" fill="#059669" radius={[0, 4, 4, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    ) : (
+      <EmptyChart>Sin datos para graficar</EmptyChart>
+    );
+  }
+
+  function renderRecoveryCapacityChart(data: ChartPoint[], color: string) {
+    return data.length ? (
+      <div className={styles.chartShell}>
+        <ResponsiveContainer width="100%" height={320}>
+          <BarChart data={data} margin={{ left: 0, right: 16, top: 8, bottom: 72 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#dce5f0" />
+            <XAxis dataKey="name" interval={0} angle={-35} textAnchor="end" height={72} tick={{ fontSize: 11 }} />
+            <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+            <Tooltip />
+            <Bar dataKey="total" name="Cilindros" fill={color} radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    ) : (
+      <EmptyChart>Sin datos para graficar</EmptyChart>
+    );
+  }
+
+  function renderRecoveryScheduleDateChart(data: RecoveryManagementDatePoint[]) {
+    return data.length ? (
+      <div className={styles.chartShell}>
+        <ResponsiveContainer width="100%" height={280}>
+          <BarChart data={data} barGap={7} barCategoryGap="28%" margin={{ left: 0, right: 16, top: 28, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#dce5f0" />
+            <XAxis dataKey="name" interval={0} angle={-35} textAnchor="end" height={54} tick={{ fontSize: 12 }} />
+            <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+            <Tooltip />
+            <Legend verticalAlign="top" height={28} />
+            <ReferenceLine y={20} stroke="#dc2626" strokeWidth={2.5} strokeDasharray="7 4" label={{ value: "Meta diaria · 20", position: "insideTopRight", fill: "#b91c1c", fontSize: 12, fontWeight: 700 }} />
+            <Bar dataKey="managed" name="Gestiones registradas" fill="#2563eb" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="scheduled" name="Programaciones de recojo" fill="#f43f5e" radius={[4, 4, 0, 0]}>
+              {data.map((entry) => <Cell key={entry.name} fill={entry.scheduled >= 20 ? "#10b981" : "#f43f5e"} />)}
+              <LabelList dataKey="scheduled" position="top" fill="#334155" fontSize={12} fontWeight={700} />
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    ) : (
+      <EmptyChart>Sin programaciones de recojo para graficar</EmptyChart>
     );
   }
 
@@ -2781,6 +3240,8 @@ export default function Home() {
     setMatrixRangeLabel(label);
     setTimelineDay(timelineDaysFromRows(mappedRows)[0] ?? "");
     setShowSlowResolutionOnly(false);
+    setMatrixUserFocus(null);
+    setMatrixStatusFocus(null);
     setHoveredTimelineId(null);
   }
 
@@ -2837,7 +3298,14 @@ export default function Home() {
             <XAxis dataKey="name" tick={{ fontSize: 12 }} />
             <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
             <Tooltip />
-            <Legend />
+            <Legend content={() => (
+              <div style={{ display: "flex", justifyContent: "center", flexWrap: "wrap", gap: "8px 16px", paddingTop: 8, fontSize: 12 }}>
+                <span><i style={{ display: "inline-block", width: 10, height: 10, marginRight: 4, background: "#7c3aed" }} />Llamadas &lt;20s</span>
+                <span><i style={{ display: "inline-block", width: 10, height: 10, marginRight: 4, background: "#dc2626" }} />Llamadas abandonadas</span>
+                <span><i style={{ display: "inline-block", width: 10, height: 10, marginRight: 4, background: "#059669" }} />Llamadas atendidas</span>
+                <span><i style={{ display: "inline-block", width: 10, height: 10, marginRight: 4, background: "#2563eb" }} />Llamadas recibidas</span>
+              </div>
+            )} />
             <Bar isAnimationActive={false} dataKey="received" name="Llamadas recibidas" fill="#2563eb" radius={[4, 4, 0, 0]}>
               {combinedMonthlyCallData.map((entry) => <Cell key={`received-${entry.name}`} fill="#2563eb" opacity={isDimmed("month", entry.name) ? 0.2 : 1} />)}
             </Bar>
@@ -2846,6 +3314,9 @@ export default function Home() {
             </Bar>
             <Bar isAnimationActive={false} dataKey="under20" name="Llamadas <20s" fill="#7c3aed" radius={[4, 4, 0, 0]}>
               {combinedMonthlyCallData.map((entry) => <Cell key={`under20-${entry.name}`} fill="#7c3aed" opacity={isDimmed("month", entry.name) ? 0.2 : 1} />)}
+            </Bar>
+            <Bar isAnimationActive={false} dataKey="abandoned" name="Llamadas abandonadas" fill="#dc2626" radius={[4, 4, 0, 0]}>
+              {combinedMonthlyCallData.map((entry) => <Cell key={`abandoned-${entry.name}`} fill="#dc2626" opacity={isDimmed("month", entry.name) ? 0.2 : 1} />)}
             </Bar>
           </BarChart>
         </ResponsiveContainer>
@@ -3008,25 +3479,6 @@ export default function Home() {
         </ResponsiveContainer>
       </div>
     ) : <EmptyChart>Sin llamadas atendidas para calcular TMO</EmptyChart>;
-  }
-
-  function renderAbandonmentChart() {
-    // Cuando la API está cargada, usamos la misma serie mensual que alimenta
-    // el KPI: abandono = llamadas recibidas - llamadas atendidas.
-    const monthlyData = combinedMonthlyCallData;
-    return monthlyData.length ? (
-      <div className={styles.chartShell}>
-        <ResponsiveContainer width="100%" height={300}>
-          <BarChart data={monthlyData} margin={{ left: 0, right: 16, top: 8, bottom: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#dce5f0" />
-            <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-            <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-            <Tooltip />
-            <Bar dataKey="abandoned" name="Llamadas abandonadas" fill="#7c3aed" radius={[4, 4, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-    ) : <EmptyChart>Sin meses para calcular abandono</EmptyChart>;
   }
 
   function renderCampaignChart(height = campaignChartHeight) {
@@ -3231,17 +3683,24 @@ export default function Home() {
         </button>
         <button
           type="button"
+          className={activeView === "recovery" ? styles.topNavActive : ""}
+          onClick={() => setActiveView("recovery")}
+        >
+          I4 - Recuperación cilindros
+        </button>
+        <button
+          type="button"
           className={activeView === "errors" ? styles.topNavActive : ""}
           onClick={() => setActiveView("errors")}
         >
-          I4 - Tasa de error
+          I5 - Tasa de error
         </button>
         <button
           type="button"
           className={activeView === "performance" ? styles.topNavActive : ""}
           onClick={() => setActiveView("performance")}
         >
-          I5 - Rendimiento operativo
+          I6 - Rendimiento operativo
         </button>
       </nav>
 
@@ -3251,8 +3710,39 @@ export default function Home() {
             <div>
               <small className={styles.reportKicker}>Indicador 01 · Canal inbound</small>
               <h2>I1 - Llamadas inbound</h2>
-              <span className={styles.reportDescription}>Volumen, atención, campañas y horarios · LINDESAC excluida · <a href="/MANUAL_I1.txt" download>Descargar manual I1</a></span>
+              <span className={styles.reportDescription}>Volumen, atención, campañas y horarios · LINDESAC excluida · Descarga directa desde A365 o carga manual de archivo · <a href="/MANUAL_I1.txt" download>Descargar manual I1</a></span>
             </div>
+            <form className={styles.reportForm} onSubmit={loadInboundCallsReport}>
+              <label>
+                Desde
+                <input type="date" value={callReportStartDate} onChange={(event) => { setCallReportStartDate(event.target.value); setCallStartDate(event.target.value); }} required />
+              </label>
+              <label>
+                Hasta
+                <input type="date" value={callReportEndDate} onChange={(event) => { setCallReportEndDate(event.target.value); setCallEndDate(event.target.value); }} required />
+              </label>
+              <label>
+                PHPSESSID de A365
+                <input
+                  type="password"
+                  value={callReportSessionId}
+                  onChange={(event) => setCallReportSessionId(event.target.value)}
+                  placeholder="PHPSESSID=... o solo el valor"
+                  autoComplete="off"
+                  required
+                />
+              </label>
+              <button type="submit" disabled={isDownloadingCallReport}>
+                <Download size={16} aria-hidden="true" />
+                {isDownloadingCallReport ? "Descargando..." : "Cargar A365"}
+              </button>
+              {inboundReportFile ? <button type="button" onClick={() => downloadInboundSourceFile(inboundReportFile)}>
+                <Download size={16} aria-hidden="true" />
+                Descargar Excel
+              </button> : null}
+            </form>
+            {callReportError ? <strong>{callReportError}</strong> : null}
+            {callAutoRefreshEnabled ? <div className={styles.reportAutoRefresh}>Actualización automática activa cada 3 minutos.</div> : null}
             <div
               className={`${styles.inlineUpload} ${isDragging ? styles.dropzoneActive : ""}`}
               onClick={() => inputRef.current?.click()}
@@ -3284,12 +3774,6 @@ export default function Home() {
                 accept=".txt,.csv,.tsv,.xlsx,.xls"
                 onChange={(event) => handleFiles(event.target.files)}
               />
-            </div>
-            <div className={styles.callDateFilter}>
-              <span>Filtrar intervalo de fechas</span>
-              <label>Desde<input type="date" value={callStartDate} onChange={(event) => setCallStartDate(event.target.value)} /></label>
-              <label>Hasta<input type="date" value={callEndDate} onChange={(event) => setCallEndDate(event.target.value)} /></label>
-              {(callStartDate || callEndDate) ? <button type="button" onClick={() => { setCallStartDate(""); setCallEndDate(""); }}>Limpiar</button> : null}
             </div>
           </section>
 
@@ -3391,7 +3875,7 @@ export default function Home() {
                 }}
               >
                 <ListFilter size={16} aria-hidden="true" />
-                &gt; 20 min resolucion
+                &gt; {SLOW_RESOLUTION_MINUTES} min resolucion
               </button>
               <strong>
                 {visibleMatrixRows.length.toLocaleString("es-PE")} de {matrixRows.length.toLocaleString("es-PE")} registros
@@ -3405,6 +3889,20 @@ export default function Home() {
             <StatCard icon={<Clock3 size={18} />} label="NDS" value={formatPercent(emailSummary.nds)} />
             <StatCard icon={<Timer size={18} />} label="TMO promedio" value={formatEmailTmo(emailSummary.tmoMinutes)} />
             <StatCard icon={<Hash size={18} />} label="Correos atendidos" value={emailSummary.attended.toLocaleString("es-PE")} />
+          </div>
+
+          <div className={`${styles.matrixGrid} ${styles.fullWidthDashboard}`}>
+            <ChartPanel
+              title="Mapa de calor I2"
+              meta="Correos recibidos por día y hora · pasa el cursor para ver la tipificación"
+              comparison={emailVolumeComparison}
+            >
+              <HeatmapGrid
+                cells={emailHeatmap}
+                formatter={(value) => `${value.toLocaleString("es-PE")} correos recibidos`}
+                detailFormatter={(cell) => emailTipificationsByHeatmapCell.get(heatmapCellKey(cell.day, cell.hour)) ?? "Por tipificación: sin correos"}
+              />
+            </ChartPanel>
           </div>
 
           {renderAgentTimeline()}
@@ -3432,16 +3930,6 @@ export default function Home() {
               {renderMatrixBarChart(emailSummary.byUser, "#475569")}
             </ChartPanel>
             <ChartPanel
-              title="Mapa de calor I2"
-              meta="Correos recibidos por día y hora"
-              comparison={emailVolumeComparison}
-            >
-              <HeatmapGrid
-                cells={emailHeatmap}
-                formatter={(value) => `${value.toLocaleString("es-PE")} correos recibidos`}
-              />
-            </ChartPanel>
-            <ChartPanel
               title="Promedio por agente"
               meta={`${matrixSummary.avgByAgent.length} agentes`}
             >
@@ -3463,9 +3951,15 @@ export default function Home() {
             </ChartPanel>
             <ChartPanel
               title="Estado de registro"
-              meta={`${matrixSummary.byEstado.length} estados`}
+              meta={`${matrixSummary.byEstado.length} estados · clic para ver el detalle`}
             >
-              {renderMatrixBarChart(matrixSummary.byEstado, "#059669")}
+              {renderMatrixBarChart(
+                matrixSummary.byEstado,
+                "#059669",
+                280,
+                (status) => setMatrixStatusFocus((current) => normalizeKey(current ?? "") === normalizeKey(status) ? null : status),
+                matrixStatusFocus,
+              )}
             </ChartPanel>
           </div>
 
@@ -3483,10 +3977,11 @@ export default function Home() {
                 <span>
                   {filteredMatrixRows.length.toLocaleString("es-PE")} de {visibleMatrixRows.length.toLocaleString("es-PE")} registros
                   {matrixUserFocus ? ` · usuario: ${matrixUserFocus}` : ""}
+                  {matrixStatusFocus ? ` · estado: ${matrixStatusFocus}` : ""}
                   {hiddenMatrixRows ? `, mostrando ${matrixDetailRows.length.toLocaleString("es-PE")} para mantener fluidez` : ""}
                 </span>
               </div>
-              {matrixUserFocus ? <button className={styles.chartActionButton} type="button" onClick={() => setMatrixUserFocus(null)}>Mostrar todos los usuarios</button> : null}
+              {matrixUserFocus || matrixStatusFocus ? <button className={styles.chartActionButton} type="button" onClick={() => { setMatrixUserFocus(null); setMatrixStatusFocus(null); }}>Limpiar filtros del detalle</button> : null}
             </div>
             {matrixTipificacionIndicators.length ? <div className={styles.detailIndicators} aria-label="Tipificaciones realizadas">
               {matrixTipificacionIndicators.map((point) => <div className={styles.detailIndicator} key={point.name}><span title={point.name}>{point.name}</span><strong>{point.total.toLocaleString("es-PE")}</strong></div>)}
@@ -3546,13 +4041,100 @@ export default function Home() {
 
       {activeView === "sales" ? renderSalesContent() : null}
 
+      {activeView === "recovery" ? (
+        <>
+          <section className={styles.reportPanel} onClick={stopInsideClick}>
+            <div>
+              <small className={styles.reportKicker}>Indicador 04 · Préstamo de cilindros</small>
+              <h2>I4 - Recuperación cilindros</h2>
+              <span className={styles.reportDescription}>Carga la hoja BD OCT26 para conocer clientes, cilindros de oxígeno por capacidad y gestión de recuperación.</span>
+            </div>
+            <div className={styles.inlineUpload} onClick={() => recoveryInputRef.current?.click()} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") recoveryInputRef.current?.click(); }}>
+              <FileSpreadsheet size={18} aria-hidden="true" />
+              <span>{recoveryFileName}</span>
+              <strong>Cargar BD OCT26</strong>
+              <input ref={recoveryInputRef} type="file" accept=".xlsx,.xls" onChange={(event) => handleRecoveryFiles(event.target.files)} />
+            </div>
+            {recoveryError ? <strong>{recoveryError}</strong> : null}
+          </section>
+
+          {recoveryRows.length ? <>
+            <section className={styles.filterBar} onClick={stopInsideClick}>
+              <div className={styles.filterBarHeader}>
+                <strong>Filtros de gestión</strong>
+                {(recoveryStartDate || recoveryEndDate || recoveryManagementAgent) ? <button className={styles.chartActionButton} type="button" onClick={() => { setRecoveryStartDate(""); setRecoveryEndDate(""); setRecoveryManagementAgent(""); }}>Limpiar filtros</button> : null}
+              </div>
+              <div className={styles.filterGrid}>
+                <label>Fecha de gestión desde<input type="date" value={recoveryStartDate} onChange={(event) => setRecoveryStartDate(event.target.value)} /></label>
+                <label>Fecha de gestión hasta<input type="date" value={recoveryEndDate} onChange={(event) => setRecoveryEndDate(event.target.value)} /></label>
+                <label>Agente que realiza gestión<select value={recoveryManagementAgent} onChange={(event) => setRecoveryManagementAgent(event.target.value)}><option value="">Todos los agentes</option>{recoveryManagementAgents.map((agent) => <option key={agent} value={agent}>{agent}</option>)}</select></label>
+              </div>
+            </section>
+
+            <section className={styles.statsGrid} onClick={stopInsideClick}>
+              <StatCard icon={<Hash size={18} />} label="Cilindros en préstamo" value={recoveryFilteredRows.length.toLocaleString("es-PE")} />
+              <StatCard icon={<UserRound size={18} />} label="Clientes" value={recoveryCustomers.toLocaleString("es-PE")} />
+              <StatCard icon={<Phone size={18} />} label="Cilindros de oxígeno" value={recoveryOxygenRows.length.toLocaleString("es-PE")} />
+              <StatCard icon={<ClipboardList size={18} />} label="Gestiones registradas" value={recoveryManagedRows.toLocaleString("es-PE")} />
+              <StatCard icon={<UserRound size={18} />} label="Clientes gestionados" value={recoveryManagedCustomers.toLocaleString("es-PE")} />
+              <StatCard icon={<PackageCheck size={18} />} label="N.º de cilindros recuperados" value={recoveredCylinders.toLocaleString("es-PE")} />
+            </section>
+
+            <section className={styles.dashboardGrid} onClick={stopInsideClick}>
+              <ChartPanel title="Cilindros por asesor" meta="Todos los asesores · campo Asesor">
+                {renderRecoveryRankingChart(recoveryByAdvisor, "#2563eb", (advisor) => setRecoveryAdvisorFocus((current) => {
+                  const next = current === advisor ? null : advisor;
+                  setRecoveryCustomerFocus(null);
+                  setRecoveryProductFocus(null);
+                  return next;
+                }), recoveryAdvisorFocus)}
+              </ChartPanel>
+              <ChartPanel title="Clientes con cilindros" meta={recoveryAdvisorFocus ? `Top 20 · clientes de: ${recoveryAdvisorFocus} · clic nuevamente para limpiar` : "Código de cliente y razón social · Top 20"}>
+                {renderRecoveryRankingChart(recoveryByCustomer, "#059669", (customer) => setRecoveryCustomerFocus((current) => {
+                  const next = current === customer ? null : customer;
+                  setRecoveryProductFocus(null);
+                  return next;
+                }), recoveryCustomerFocus)}
+              </ChartPanel>
+              <ChartPanel title="Cilindros por producto" meta={recoveryCustomerFocus ? `Top 12 · productos de: ${recoveryCustomerFocus} · clic nuevamente para limpiar` : "Top 12 · campo Producto"}>
+                {renderRecoveryRankingChart(recoveryByProduct, "#7c3aed", (product) => setRecoveryProductFocus((current) => current === product ? null : product), recoveryProductFocus)}
+              </ChartPanel>
+              <ChartPanel title="Oxígeno por capacidad" meta={recoveryProductFocus ? `Capacidades de: ${recoveryProductFocus} · clic nuevamente para limpiar` : recoveryCustomerFocus ? `Todas las capacidades de los productos de: ${recoveryCustomerFocus}` : "Selecciona un producto para ver sus capacidades · oxígeno por defecto"}>
+                {renderRecoveryCapacityChart(recoveryOxygenByCapacity, "#0891b2")}
+              </ChartPanel>
+              <ChartPanel title="Gestiones por agente" meta="AGENTE QUE REALIZA GESTIÓN · Top 12">
+                {renderRecoveryAgentChart(recoveryByManagementAgent)}
+              </ChartPanel>
+              <ChartPanel title="Gestiones por fecha" meta="Gestiones registradas y programaciones de recojo · línea base: 20">
+                {renderRecoveryScheduleDateChart(recoveryByManagementDate)}
+              </ChartPanel>
+            </section>
+
+            <article className={styles.panel} onClick={stopInsideClick}>
+              <div className={styles.panelHeader}>
+                <div>
+                  <h2>Detalle de recuperación</h2>
+                  <span>{recoveryFilteredRows.length.toLocaleString("es-PE")} cilindros{recoveryHiddenRows ? ` · mostrando ${recoveryDetailRows.length.toLocaleString("es-PE")} para mantener fluidez` : ""}</span>
+                </div>
+              </div>
+              <div className={styles.tableWrap}>
+                <table>
+                  <thead><tr><th>Asesor</th><th>Cód. cliente</th><th>Razón social</th><th>Producto</th><th>Capacidad</th><th>Fecha de gestión</th><th>Agente que realiza gestión</th><th>Observaciones o comentarios</th></tr></thead>
+                  <tbody>{recoveryDetailRows.map((row) => <tr key={row.id}><td>{row.advisor}</td><td>{row.customerCode}</td><td>{row.customerName}</td><td>{row.product}</td><td>{row.capacity}</td><td>{row.managementDate ? formatDateTimeMinute(row.managementDate) : "Pendiente de gestión"}</td><td>{row.managementAgent}</td><td>{row.observations || "Sin observaciones"}</td></tr>)}</tbody>
+                </table>
+              </div>
+            </article>
+          </> : <section className={styles.emptyState} onClick={stopInsideClick}><ClipboardList size={22} aria-hidden="true" /><strong>I4 - Recuperación cilindros listo</strong><span>Carga el Excel con la hoja BD OCT26 para visualizar el préstamo y la gestión de cilindros.</span></section>}
+        </>
+      ) : null}
+
       {activeView === "errors" ? (
         <>
           {incidentError ? <div className={styles.error} onClick={stopInsideClick}>{incidentError}</div> : null}
 
           <section className={styles.reportPanel} onClick={stopInsideClick}>
             <div>
-              <h2>Desvíos e incidencias</h2>
+              <h2>I5 - Tasa de error</h2>
               <span>Un solo Excel: hoja DATA para incidencias y BDCLIENTE para región y clasificación ABC.</span>
             </div>
             <div
@@ -3684,7 +4266,7 @@ export default function Home() {
         <section className={styles.matrixSection} onClick={stopInsideClick}>
           <div className={styles.matrixHeader}>
             <div>
-              <span className={styles.eyebrow}>I4 - Rendimiento operativo</span>
+              <span className={styles.eyebrow}>I6 - Rendimiento operativo</span>
               <h2>Productividad, calidad y eficiencia</h2>
               <p>Calculado con llamadas inbound, correos matriz y errores levantados.</p>
             </div>
@@ -3816,8 +4398,8 @@ export default function Home() {
       <section className={styles.dashboardGrid}>
         <ChartPanel
           title="Llamadas por mes"
-          meta={`${monthlyCallData.length} meses · <20s según Tiempo en espera (Cola)`}
-          info="Campos: Fecha, Corte de llamada y Tiempo en espera (Cola). La serie Llamadas <20s cuenta llamadas atendidas cuyo tiempo de espera esté entre 0 y 20 segundos, inclusive."
+          meta={`${monthlyCallData.length} meses · <20s y abandono mensual`}
+          info="Campos: Fecha, Corte de llamada y Tiempo en espera (Cola). Llamadas <20s cuenta llamadas atendidas cuyo tiempo de espera esté entre 0 y 20 segundos, inclusive. Abandono = llamadas recibidas menos llamadas atendidas."
           comparison={callComparisonBadge("volumen", (month) => month.received)}
           onExpand={() => setExpandedChart("date")}
           onExport={() => void exportChart("date", "Llamadas por mes")}
@@ -3825,6 +4407,14 @@ export default function Home() {
           <div ref={dateChartRef} className={styles.exportFrame}>
             {renderDateChart()}
           </div>
+        </ChartPanel>
+
+        <ChartPanel title="Nivel de atención y servicio por mes" meta="NA: atendidas / recibidas · NS: atendidas <20s / recibidas" comparison={callComparisonBadge("NA", (month) => percentage(month.attended, month.received))} info="Campos: Corte de llamada, Tiempo en espera (Cola) y Fecha. NA = llamadas atendidas / llamadas recibidas × 100. NS = llamadas atendidas con espera menor a 20 segundos / llamadas recibidas × 100.">
+          {renderServiceQualityChart()}
+        </ChartPanel>
+
+        <ChartPanel title="TMO por mes" meta="Tiempo medio de operación" comparison={callComparisonBadge("TMO", (month) => "averageDurationSeconds" in month ? month.averageDurationSeconds : null)}>
+          {renderServiceDurationChart()}
         </ChartPanel>
 
         <ChartPanel
@@ -3839,15 +4429,8 @@ export default function Home() {
           </div>
         </ChartPanel>
 
-        <ChartPanel
-          title="Categorías"
-          meta={`${statusChartData.length} categorías`}
-          comparison={callComparisonBadge("volumen", (month) => month.received)}
-          onExpand={() => setExpandedChart("status")}
-          onExport={() => void exportChart("status", "Categorías")}
-          info="Campo: status_name. Cuenta las llamadas por categoría. Al seleccionar una categoría, las demás permanecen visibles y atenuadas; el filtro se combina con los demás dashboards."
-        >
-          <div ref={statusChartRef} className={styles.exportFrame}>{renderStatusChart()}</div>
+        <ChartPanel title="Distribución de duración" meta="Segundos por llamada" comparison={callComparisonBadge("volumen", (month) => month.received)} info="Campo: length_in_sec. Agrupa las llamadas en rangos de duración para identificar concentración operativa.">
+          {renderDurationDistribution()}
         </ChartPanel>
 
         <ChartPanel
@@ -3871,18 +4454,6 @@ export default function Home() {
 
       <section className={styles.serviceSection} onClick={stopInsideClick}>
         <div className={styles.dashboardGrid}>
-          <ChartPanel title="Nivel de atención y servicio por mes" meta="NA: atendidas / recibidas · NS: atendidas <20s / recibidas" comparison={callComparisonBadge("NA", (month) => percentage(month.attended, month.received))} info="Campos: Corte de llamada, Tiempo en espera (Cola) y Fecha. NA = llamadas atendidas / llamadas recibidas × 100. NS = llamadas atendidas con espera menor a 20 segundos / llamadas recibidas × 100.">
-            {renderServiceQualityChart()}
-          </ChartPanel>
-          <ChartPanel title="TMO por mes" meta="Tiempo medio de operación" comparison={callComparisonBadge("TMO", (month) => "averageDurationSeconds" in month ? month.averageDurationSeconds : null)}>
-            {renderServiceDurationChart()}
-          </ChartPanel>
-          <ChartPanel title="Abandono por mes" meta="Recibidas menos atendidas" comparison={callComparisonBadge("abandono", (month) => percentage(Math.max(0, month.received - month.attended), month.received))}>
-            {renderAbandonmentChart()}
-          </ChartPanel>
-          <ChartPanel title="Distribución de duración" meta="Segundos por llamada" comparison={callComparisonBadge("volumen", (month) => month.received)} info="Campo: length_in_sec. Agrupa las llamadas en rangos de duración para identificar concentración operativa.">
-            {renderDurationDistribution()}
-          </ChartPanel>
           <ChartPanel title="Rendimiento por usuario" meta="Recibidas y atendidas" comparison={callComparisonBadge("volumen", (month) => month.received)} info="Campos: user y length_in_sec. Compara llamadas recibidas contra atendidas por usuario.">
             {renderUserPerformance()}
           </ChartPanel>

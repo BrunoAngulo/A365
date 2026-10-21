@@ -591,6 +591,13 @@
   font-size: 13px;
 }
 
+.reportAutoRefresh {
+  grid-column: 1 / -1;
+  color: #047857;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .reportForm {
   display: grid;
   grid-template-columns: repeat(2, minmax(130px, 1fr)) minmax(180px, 1.2fr) auto;
