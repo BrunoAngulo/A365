@@ -21,13 +21,17 @@ window.addEventListener("message", (event) => {
     return;
   }
 
-  if (event.data.type !== "A365_MATRIX_REPORT_REQUEST") {
+  if (!["A365_MATRIX_REPORT_REQUEST", "A365_INBOUND_REPORT_REQUEST"].includes(event.data.type)) {
     return;
   }
 
+  const responseType = event.data.type === "A365_INBOUND_REPORT_REQUEST"
+    ? "A365_INBOUND_REPORT_RESPONSE"
+    : "A365_MATRIX_REPORT_RESPONSE";
+
   chrome.runtime.sendMessage(
     {
-      type: "A365_MATRIX_REPORT_REQUEST",
+      type: event.data.type,
       requestId: event.data.requestId,
       payload: event.data.payload,
     },
@@ -36,7 +40,7 @@ window.addEventListener("message", (event) => {
         window.postMessage(
           {
             source: EXTENSION_SOURCE,
-            type: "A365_MATRIX_REPORT_RESPONSE",
+            type: responseType,
             requestId: event.data.requestId,
             ok: false,
             error: chrome.runtime.lastError.message || "La extension no pudo comunicarse con el navegador.",
@@ -49,7 +53,7 @@ window.addEventListener("message", (event) => {
       window.postMessage(
         {
           source: EXTENSION_SOURCE,
-          type: "A365_MATRIX_REPORT_RESPONSE",
+          type: responseType,
           requestId: event.data.requestId,
           ...(response || {
             ok: false,

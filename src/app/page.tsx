@@ -2794,6 +2794,33 @@ export default function Home() {
     if (file) void loadRecoveryFile(file);
   }
 
+  const requestInboundReportFromExtension = useCallback(() => new Promise<Blob>((resolve, reject) => {
+    const requestId = crypto.randomUUID();
+    const timeout = window.setTimeout(() => {
+      window.removeEventListener("message", handleResponse);
+      reject(new Error("La extensión no respondió. Recarga la web o revisa que esté instalada."));
+    }, 60000);
+
+    function handleResponse(event: MessageEvent<ExtensionMatrixResponse>) {
+      if (event.source !== window || event.data?.source !== "a365-extension" || event.data.type !== "A365_INBOUND_REPORT_RESPONSE" || event.data.requestId !== requestId) return;
+      window.clearTimeout(timeout);
+      window.removeEventListener("message", handleResponse);
+      if (!event.data.ok || !event.data.dataBase64) {
+        reject(new Error(event.data.error ?? "La extensión no pudo descargar el reporte inbound."));
+        return;
+      }
+      resolve(new Blob([base64ToUint8Array(event.data.dataBase64)], { type: event.data.contentType || "application/vnd.ms-excel" }));
+    }
+
+    window.addEventListener("message", handleResponse);
+    window.postMessage({
+      source: "a365-dashboard",
+      type: "A365_INBOUND_REPORT_REQUEST",
+      requestId,
+      payload: { startDate: callReportStartDate, endDate: callReportEndDate, token: callReportToken },
+    }, window.location.origin);
+  }), [callReportEndDate, callReportStartDate, callReportToken]);
+
   const downloadInboundSourceFile = useCallback((blob: Blob) => {
     const link = document.createElement("a");
     const objectUrl = URL.createObjectURL(blob);
@@ -2809,21 +2836,25 @@ export default function Home() {
     setIsDownloadingCallReport(true);
 
     try {
-      const response = await fetch("/api/inbound-calls-report", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          startDate: callReportStartDate,
-          endDate: callReportEndDate,
-          password: callReportToken,
-        }),
-      });
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(payload?.error ?? "No pude descargar el reporte inbound.");
+      let reportBlob: Blob;
+      if (extensionReady) {
+        reportBlob = await requestInboundReportFromExtension();
+      } else {
+        const response = await fetch("/api/inbound-calls-report", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            startDate: callReportStartDate,
+            endDate: callReportEndDate,
+            password: callReportToken,
+          }),
+        });
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+          throw new Error(payload?.error ?? "No pude descargar el reporte inbound.");
+        }
+        reportBlob = await response.blob();
       }
-
-      const reportBlob = await response.blob();
       setInboundReportFile(reportBlob);
       const file = new File(
         [reportBlob],
@@ -2879,7 +2910,7 @@ export default function Home() {
     } finally {
       setIsDownloadingCallReport(false);
     }
-  }, [callReportEndDate, callReportStartDate, callReportToken, downloadInboundSourceFile]);
+  }, [callReportEndDate, callReportStartDate, callReportToken, downloadInboundSourceFile, extensionReady, requestInboundReportFromExtension]);
 
   async function loadInboundCallsReport(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -3927,7 +3958,7 @@ export default function Home() {
             <div>
               <small className={styles.reportKicker}>Indicador 01 · Canal inbound</small>
               <h2>I1 - Llamadas inbound</h2>
-              <span className={styles.reportDescription}>Volumen, atención, campañas y horarios · LINDESAC excluida · Descarga directa desde A365 o carga manual de archivo · <a href="/MANUAL_I1.txt" download>Descargar manual I1</a></span>
+              <span className={styles.reportDescription}>{extensionReady ? "Extensión local conectada: la descarga se realizará desde este navegador." : "Volumen, atención, campañas y horarios · LINDESAC excluida · Para la web publicada instala la extensión local de A365."} · <a href="/a365-extension.zip" download>Descargar extensión local</a> · <a href="/MANUAL_I1.txt" download>Descargar manual I1</a></span>
             </div>
             <form className={styles.reportForm} onSubmit={loadInboundCallsReport}>
               <label>

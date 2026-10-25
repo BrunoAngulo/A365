@@ -1,4 +1,15 @@
 const REPORT_BASE_URL = "https://applinde.a365.com.pe/reportes/reporte_matriz";
+const INBOUND_ORIGIN = "https://tmkreport.a365.com.pe:7443";
+const INBOUND_LOGIN_PAGE = `${INBOUND_ORIGIN}/pe/intranet/index.php`;
+const INBOUND_LOGIN = `${INBOUND_ORIGIN}/pe/intranet/ti_login_acceso.php`;
+const INBOUND_REPORT_PAGE = `${INBOUND_ORIGIN}/pe/intranet/aai_claro_asistencia_reporte_inbound.php`;
+const INBOUND_GENERATE = `${INBOUND_ORIGIN}/pe/intranet/aai_claro_asistencia_vicidial_reporte_operativo_acumulada_inbound_detalle_calls.php`;
+const INBOUND_DOWNLOAD = `${INBOUND_ORIGIN}/pe/intranet/aai_claro_asistencia_reporte_descarga_excel.php`;
+const INBOUND_QUEUES = [
+  "INLINDECLI", "INLINDEINDCEN", "INLINDEINDDES", "INLINDEINDNOR", "INLINDEINDORI", "INLINDEINDSUR",
+  "INLINDEMEDCEN", "INLINDEMEDDES", "INLINDEMEDNOR", "INLINDEMEDORI", "INLINDEMEDSUR", "INLINDESAC",
+  "INLINDETERA", "INLINDEURGCEN", "INLINDEURGDES", "INLINDEURGNORTE", "INLINDEURGORI", "INLINDEURGSUR",
+];
 
 function normalizeSession(value = "") {
   const text = String(value).trim();
@@ -115,7 +126,92 @@ async function downloadMatrixReport(payload) {
   };
 }
 
+function extractInboundCsrf(page) {
+  return page.match(/data-csrf\s*=\s*["']([^"']+)["']/i)?.[1] || "";
+}
+
+function extractInboundCampaign(page) {
+  const patterns = [
+    /(?:name|id)\s*=\s*["']vm_camp["'][^>]*value\s*=\s*["']([^"']+)["']/i,
+    /value\s*=\s*["']([^"']+)["'][^>]*(?:name|id)\s*=\s*["']vm_camp["']/i,
+    /["']vm_camp["']\s*:\s*["']([^"']+)["']/i,
+    /(?:var\s+)?vm_camp\s*[:=]\s*["']([^"']+)["']/i,
+    /\b(dmFf[A-Za-z0-9+/=]{32,})\b/,
+  ];
+  for (const pattern of patterns) {
+    const value = page.match(pattern)?.[1]?.trim();
+    if (value && value.length >= 24) return value;
+  }
+  return "";
+}
+
+function inboundHeaders(extra = {}) {
+  return {
+    "accept-language": "es-PE,es;q=0.9",
+    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+    ...extra,
+  };
+}
+
+function wait(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function downloadInboundReport(payload) {
+  const startDate = String(payload?.startDate || "").trim();
+  const endDate = String(payload?.endDate || "").trim();
+  const token = String(payload?.token || "");
+  if (!isValidDate(startDate) || !isValidDate(endDate) || startDate > endDate) throw new Error("Selecciona fechas válidas.");
+  if (!token) throw new Error("Ingresa tu token de A365.");
+
+  const loginPageResponse = await fetch(INBOUND_LOGIN_PAGE, { cache: "no-store", credentials: "include", headers: inboundHeaders({ accept: "text/html" }) });
+  const loginCsrf = extractInboundCsrf(await loginPageResponse.text());
+  if (!loginPageResponse.ok || !loginCsrf) throw new Error("No pude preparar el inicio de sesión de A365.");
+
+  const loginPayload = new URLSearchParams({ usernamePost: "psalasb", passwordPost: token, extensionPost: "", csrfPost: loginCsrf });
+  const loginResponse = await fetch(INBOUND_LOGIN, {
+    method: "POST", cache: "no-store", credentials: "include",
+    headers: inboundHeaders({ accept: "application/json, text/plain, */*", "content-type": "application/x-www-form-urlencoded; charset=UTF-8", origin: INBOUND_ORIGIN, "x-requested-with": "XMLHttpRequest" }),
+    body: loginPayload,
+  });
+  if (!loginResponse.ok) throw new Error("No pude iniciar sesión en A365.");
+
+  const reportPageResponse = await fetch(INBOUND_REPORT_PAGE, { cache: "no-store", credentials: "include", headers: inboundHeaders({ accept: "text/html" }) });
+  const campaign = extractInboundCampaign(await reportPageResponse.text());
+  if (!reportPageResponse.ok || !campaign) throw new Error("A365 no devolvió la configuración de campaña.");
+
+  const generationPayload = new URLSearchParams({
+    vm_camp: campaign, vm_fecha_ini: startDate, vm_fecha_fin: endDate, vm_busqueda: "2", vm_colas: INBOUND_QUEUES.join(","),
+    vm_duracion_prom: "undefined", vm_ns_deseado: "undefined", vm_tiempo: "undefined",
+    vm_nom_archivo: "Reporte Inbound - Detalle de llamadas.xls", vm_ruta_archivo: "reportes/",
+  });
+  const generationResponse = await fetch(INBOUND_GENERATE, {
+    method: "POST", cache: "no-store", credentials: "include",
+    headers: inboundHeaders({ accept: "*/*", "content-type": "application/x-www-form-urlencoded; charset=UTF-8", origin: INBOUND_ORIGIN, referer: INBOUND_REPORT_PAGE, "x-requested-with": "XMLHttpRequest" }),
+    body: generationPayload,
+  });
+  if (!generationResponse.ok) throw new Error(`A365 no pudo generar el reporte (${generationResponse.status}).`);
+
+  const downloadQuery = new URLSearchParams({ vm_ruta: "reportes/", vm_nom_archivo: "Reporte Inbound - Detalle de llamadas.xls" });
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const response = await fetch(`${INBOUND_DOWNLOAD}?${downloadQuery}`, { cache: "no-store", credentials: "include", headers: inboundHeaders({ accept: "*/*", referer: INBOUND_REPORT_PAGE }) });
+    if (response.ok) {
+      const buffer = await response.arrayBuffer();
+      if (buffer.byteLength) return { dataBase64: await arrayBufferToBase64(buffer), contentType: response.headers.get("content-type") || "application/vnd.ms-excel" };
+    }
+    await wait(1200);
+  }
+  throw new Error("A365 generó el reporte, pero aún no está disponible para descargar.");
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "A365_INBOUND_REPORT_REQUEST") {
+    downloadInboundReport(message.payload)
+      .then((report) => sendResponse({ ok: true, ...report }))
+      .catch((error) => sendResponse({ ok: false, error: error instanceof Error ? error.message : "No pude descargar el reporte inbound." }));
+    return true;
+  }
+
   if (message?.type !== "A365_MATRIX_REPORT_REQUEST") {
     return false;
   }
