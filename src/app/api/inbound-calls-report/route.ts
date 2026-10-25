@@ -1,4 +1,7 @@
 const portalOrigin = "https://tmkreport.a365.com.pe:7443";
+const loginPageUrl = `${portalOrigin}/pe/intranet/index.php`;
+const loginUrl = `${portalOrigin}/pe/intranet/ti_login_acceso.php`;
+const inboundUsername = "psalasb";
 const reportPageUrl = `${portalOrigin}/pe/intranet/aai_claro_asistencia_reporte_inbound.php`;
 const reportUrl = `${portalOrigin}/pe/intranet/aai_claro_asistencia_vicidial_reporte_operativo_acumulada_inbound_detalle_calls.php`;
 const downloadUrl = `${portalOrigin}/pe/intranet/aai_claro_asistencia_reporte_descarga_excel.php`;
@@ -15,6 +18,7 @@ type ReportRequest = {
   startDate?: string;
   endDate?: string;
   sessionId?: string;
+  password?: string;
 };
 
 function normalizeSession(value: string) {
@@ -28,24 +32,53 @@ function isValidDate(value: string) {
 }
 
 function isValidSession(value: string) {
-  // A365 entrega sesiones que pueden incluir guiones (por ejemplo, "8-D9...").
-  // Aceptamos únicamente los caracteres seguros para el valor de una cookie.
-  return /^[A-Za-z0-9-]+$/.test(value);
+  // A365 entrega sesiones con guiones y caracteres codificados para cookie, por
+  // ejemplo "%2C". Se conservan codificados al reenviarlos al portal.
+  return /^(?:[A-Za-z0-9_-]|%[0-9A-Fa-f]{2})+$/.test(value);
+}
+
+function sessionFromSetCookie(value: string | null) {
+  const session = value?.match(/PHPSESSID=([^;\s,]+)/i)?.[1] ?? "";
+  return normalizeSession(session);
+}
+
+function extractLoginCsrf(page: string) {
+  return page.match(/data-csrf\s*=\s*["']([^"']+)["']/i)?.[1]
+    ?? page.match(/name\s*=\s*["']csrfPost["'][^>]*value\s*=\s*["']([^"']+)["']/i)?.[1]
+    ?? page.match(/value\s*=\s*["']([^"']+)["'][^>]*name\s*=\s*["']csrfPost["']/i)?.[1]
+    ?? "";
 }
 
 function extractCampaignToken(page: string) {
   const patterns = [
-    /name\s*=\s*["']vm_camp["'][^>]*value\s*=\s*["']([^"']+)["']/i,
-    /value\s*=\s*["']([^"']+)["'][^>]*name\s*=\s*["']vm_camp["']/i,
+    /(?:name|id)\s*=\s*["']vm_camp["'][^>]*value\s*=\s*["']([^"']+)["']/i,
+    /value\s*=\s*["']([^"']+)["'][^>]*(?:name|id)\s*=\s*["']vm_camp["']/i,
+    /(?:name|id)\s*=\s*["'](?:sel_)?camp(?:ana)?["'][^>]*value\s*=\s*["']([^"']+)["']/i,
+    /value\s*=\s*["']([^"']+)["'][^>]*(?:name|id)\s*=\s*["'](?:sel_)?camp(?:ana)?["']/i,
+    /["']vm_camp["']\s*:\s*["']([^"']+)["']/i,
     /(?:var\s+)?vm_camp\s*[:=]\s*["']([^"']+)["']/i,
+    /\b(dmFf[A-Za-z0-9+/=]{32,})\b/,
   ];
 
   for (const pattern of patterns) {
     const value = page.match(pattern)?.[1]?.trim();
-    if (value) return value;
+    if (value && value.length >= 24) return value;
   }
 
   return null;
+}
+
+function internalScriptUrls(page: string) {
+  const urls = new Set<string>();
+  for (const match of page.matchAll(/<script[^>]+src\s*=\s*["']([^"']+)["']/gi)) {
+    try {
+      const url = new URL(match[1], reportPageUrl);
+      if (url.origin === portalOrigin) urls.add(url.href);
+    } catch {
+      // Ignora referencias de script malformadas del portal.
+    }
+  }
+  return Array.from(urls).slice(0, 12);
 }
 
 function looksLikeLoginPage(content: ArrayBuffer, contentType: string) {
@@ -67,22 +100,71 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null) as ReportRequest | null;
   const startDate = body?.startDate?.trim() ?? "";
   const endDate = body?.endDate?.trim() ?? "";
-  const sessionId = normalizeSession(body?.sessionId ?? "");
+  let sessionId = normalizeSession(body?.sessionId ?? "");
+  const username = inboundUsername;
+  const password = body?.password ?? "";
 
   if (!isValidDate(startDate) || !isValidDate(endDate) || startDate > endDate) {
     return Response.json({ error: "Selecciona un rango de fechas válido." }, { status: 400 });
   }
-  if (!isValidSession(sessionId)) {
-    return Response.json({ error: "Ingresa un PHPSESSID válido." }, { status: 400 });
+  if (!sessionId && !password) {
+    return Response.json({ error: "Ingresa tu token de A365." }, { status: 400 });
   }
 
-  const commonHeaders = {
-    "accept-language": "es-PE,es;q=0.9",
-    cookie: `PHPSESSID=${sessionId}`,
-    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
-  };
-
   try {
+    let loginCampaignToken: string | null = null;
+    if (!sessionId) {
+      const loginPageResponse = await fetch(loginPageUrl, {
+        cache: "no-store",
+        headers: {
+          accept: "text/html,application/xhtml+xml",
+          "accept-language": "es-PE,es;q=0.9",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        },
+      });
+      const loginPage = await loginPageResponse.text();
+      const loginCsrf = extractLoginCsrf(loginPage);
+      const loginSessionId = sessionFromSetCookie(loginPageResponse.headers.get("set-cookie"));
+      if (!loginPageResponse.ok || !loginCsrf) {
+        return Response.json({ error: "No pude preparar el inicio de sesión de A365." }, { status: 502 });
+      }
+      const loginPayload = new URLSearchParams({
+        usernamePost: username,
+        passwordPost: password,
+        extensionPost: "",
+        csrfPost: loginCsrf,
+      });
+      const loginResponse = await fetch(loginUrl, {
+        method: "POST",
+        cache: "no-store",
+        headers: {
+          accept: "application/json, text/plain, */*",
+          "accept-language": "es-PE,es;q=0.9",
+          "content-type": "application/x-www-form-urlencoded; charset=UTF-8",
+          origin: portalOrigin,
+          ...(loginSessionId ? { cookie: `PHPSESSID=${loginSessionId}` } : {}),
+          "x-requested-with": "XMLHttpRequest",
+          "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+        },
+        body: loginPayload,
+      });
+      const loginContent = await loginResponse.text();
+      sessionId = sessionFromSetCookie(loginResponse.headers.get("set-cookie")) || loginSessionId;
+      loginCampaignToken = extractCampaignToken(loginContent);
+      if (!loginResponse.ok || !isValidSession(sessionId)) {
+        return Response.json({ error: "No pude iniciar sesión en A365. Verifica tu usuario y contraseña." }, { status: 401 });
+      }
+    }
+    if (!isValidSession(sessionId)) {
+      return Response.json({ error: "Ingresa un PHPSESSID válido." }, { status: 400 });
+    }
+
+    const commonHeaders = {
+      "accept-language": "es-PE,es;q=0.9",
+      cookie: `PHPSESSID=${sessionId}`,
+      "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+    };
+
     // vm_camp es generado por A365 para la sesión autenticada. Nunca se recibe
     // del navegador ni se guarda: se lee justo antes de solicitar el reporte.
     const pageResponse = await fetch(reportPageUrl, {
@@ -93,7 +175,19 @@ export async function POST(request: Request) {
       return Response.json({ error: `No pude abrir el portal de A365 (${pageResponse.status}).` }, { status: 502 });
     }
 
-    const campaignToken = extractCampaignToken(await pageResponse.text());
+    const reportPage = await pageResponse.text();
+    let campaignToken = loginCampaignToken ?? extractCampaignToken(reportPage);
+    if (!campaignToken) {
+      for (const scriptUrl of internalScriptUrls(reportPage)) {
+        const scriptResponse = await fetch(scriptUrl, {
+          cache: "no-store",
+          headers: { ...commonHeaders, accept: "text/javascript, application/javascript, */*", referer: reportPageUrl },
+        });
+        if (!scriptResponse.ok) continue;
+        campaignToken = extractCampaignToken(await scriptResponse.text());
+        if (campaignToken) break;
+      }
+    }
     if (!campaignToken) {
       return Response.json({ error: "La sesión no devolvió la configuración de campaña. Verifica que el PHPSESSID siga activo y que tengas acceso al reporte inbound." }, { status: 401 });
     }
@@ -108,7 +202,7 @@ export async function POST(request: Request) {
       vm_ns_deseado: "undefined",
       vm_tiempo: "undefined",
       vm_nom_archivo: "Reporte Inbound - Detalle de llamadas.xls",
-      vm_ruta_archivo: "/var/log/reportes_temp/reportes_claro/",
+      vm_ruta_archivo: "reportes/",
     });
 
     const generationResponse = await fetch(reportUrl, {
@@ -132,7 +226,7 @@ export async function POST(request: Request) {
     // El generador de A365 responde vacío: deja el XLS en una ruta temporal y la
     // interfaz web lo obtiene con una segunda solicitud al endpoint de descarga.
     const downloadParams = new URLSearchParams({
-      vm_ruta: "/var/log/reportes_temp/reportes_claro/",
+      vm_ruta: "reportes/",
       vm_nom_archivo: "Reporte Inbound - Detalle de llamadas.xls",
     });
     let report: ArrayBuffer | null = null;

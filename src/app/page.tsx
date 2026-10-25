@@ -2129,7 +2129,7 @@ export default function Home() {
   const [callEndDate, setCallEndDate] = useState("");
   const [callReportStartDate, setCallReportStartDate] = useState(todayInputValue);
   const [callReportEndDate, setCallReportEndDate] = useState(todayInputValue);
-  const [callReportSessionId, setCallReportSessionId] = useState("");
+  const [callReportToken, setCallReportToken] = useState("");
   const [callReportError, setCallReportError] = useState("");
   const [inboundReportFile, setInboundReportFile] = useState<Blob | null>(null);
   const [isDownloadingCallReport, setIsDownloadingCallReport] = useState(false);
@@ -2815,7 +2815,7 @@ export default function Home() {
         body: JSON.stringify({
           startDate: callReportStartDate,
           endDate: callReportEndDate,
-          sessionId: callReportSessionId,
+          password: callReportToken,
         }),
       });
       if (!response.ok) {
@@ -2879,7 +2879,7 @@ export default function Home() {
     } finally {
       setIsDownloadingCallReport(false);
     }
-  }, [callReportEndDate, callReportSessionId, callReportStartDate, downloadInboundSourceFile]);
+  }, [callReportEndDate, callReportStartDate, callReportToken, downloadInboundSourceFile]);
 
   async function loadInboundCallsReport(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -2887,14 +2887,14 @@ export default function Home() {
   }
 
   useEffect(() => {
-    if (!callAutoRefreshEnabled || !callReportSessionId || isDownloadingCallReport) return;
+    if (!callAutoRefreshEnabled || !callReportToken || isDownloadingCallReport) return;
 
     const refreshTimer = window.setInterval(() => {
       void downloadInboundCallsReport();
     }, 180_000);
 
     return () => window.clearInterval(refreshTimer);
-  }, [callAutoRefreshEnabled, callReportSessionId, downloadInboundCallsReport, isDownloadingCallReport]);
+  }, [callAutoRefreshEnabled, callReportToken, downloadInboundCallsReport, isDownloadingCallReport]);
 
   async function loadIncidentFile(file: File) {
     setIncidentError("");
@@ -3939,13 +3939,13 @@ export default function Home() {
                 <input type="date" value={callReportEndDate} onChange={(event) => { setCallReportEndDate(event.target.value); setCallEndDate(event.target.value); }} required />
               </label>
               <label>
-                PHPSESSID de A365
+                Token A365
                 <input
                   type="password"
-                  value={callReportSessionId}
-                  onChange={(event) => setCallReportSessionId(event.target.value)}
-                  placeholder="PHPSESSID=... o solo el valor"
-                  autoComplete="off"
+                  value={callReportToken}
+                  onChange={(event) => setCallReportToken(event.target.value)}
+                  placeholder="Token"
+                  autoComplete="current-password"
                   required
                 />
               </label>
