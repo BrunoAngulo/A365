@@ -28,7 +28,9 @@ function isValidDate(value: string) {
 }
 
 function isValidSession(value: string) {
-  return /^[A-Za-z0-9]+$/.test(value);
+  // A365 entrega sesiones que pueden incluir guiones (por ejemplo, "8-D9...").
+  // Aceptamos únicamente los caracteres seguros para el valor de una cookie.
+  return /^[A-Za-z0-9-]+$/.test(value);
 }
 
 function extractCampaignToken(page: string) {

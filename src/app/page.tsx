@@ -98,6 +98,7 @@ type RecoveryAgentPoint = ChartPoint & {
 type RecoveryManagementDatePoint = {
   name: string;
   managed: number;
+  recovered: number;
   scheduled: number;
 };
 
@@ -208,8 +209,17 @@ type CylinderRecoveryRow = {
   managementAgent: string;
   managementDate: string;
   tipification: string;
+  motive: string;
+  submotive: string;
+  trackabout: string;
   observations: string;
   raw: Record<string, string>;
+};
+
+type RecoveryTipification = {
+  tipification: string;
+  motive: string;
+  submotive: string;
 };
 
 type ClientImpactPoint = ChartPoint & {
@@ -640,8 +650,27 @@ const recoveryColumnAliases = {
   managementAgent: ["agente que realiza gestion", "agente que realiza gestión"],
   managementDate: ["fecha de gestion", "fecha de gestión"],
   tipification: ["tipificacion", "tipificación"],
+  motive: ["motivo"],
+  trackabout: ["trackabout"],
   observations: ["observaciones o comentarios"],
 };
+
+const recoveryTipificationCatalog: RecoveryTipification[] = [
+  { tipification: "NO CONTACTO", motive: "NO CONTESTA", submotive: "NO ME CONTESTA EL CLIENTE" },
+  { tipification: "TELEFONO NO EXISTE", motive: "FUERA DE SERVICIO", submotive: "" },
+  { tipification: "CONTACTO", motive: "RECUPERADO", submotive: "RECUPERACION DE CILINDRO POR GESTION DEL AGENTE" },
+  { tipification: "ROTACIÓN", motive: "LIBRE CAMBIO", submotive: "" },
+  { tipification: "VENTA CILINDRO", motive: "CLIENTE ADQUIERE EL CILINDRO", submotive: "" },
+  { tipification: "ALQUILER CILINDRO", motive: "CLIENTE ALQUILA EL CILINDRO", submotive: "" },
+  { tipification: "PROGRAMACION RECOJO", motive: "CUANDO SE GENERA EL PEDIDO PARA RECOJO", submotive: "" },
+  { tipification: "SEGUIMIENTO", motive: "CORREO INFORMATIVO ENVIADO SIN RESPUESTA", submotive: "" },
+  { tipification: "CILINDROS PENDIENTES POR RECOGER", motive: "", submotive: "" },
+  { tipification: "CILINDRO EN USO", motive: "AUN CUENTA CON PRODUCTO EL CLIENTE", submotive: "" },
+  { tipification: "PENDIENTE DE GESTION", motive: "PENDIENTE DE GESTION", submotive: "SIN GESTIÓN" },
+  { tipification: "REVISION TRACKABOUT", motive: "RECUPERADO", submotive: "PLANTA" },
+  { tipification: "ASIGNADO A OTRO CLIENTE", motive: "", submotive: "" },
+  { tipification: "NO UBICADO", motive: "CILINDRO SIN UBICACIÓN", submotive: "" },
+];
 
 function normalizeKey(value: string) {
   return value
@@ -1169,25 +1198,36 @@ function mapCylinderRecoveryRows(rows: RawRow[]) {
     managementAgent: findColumn(headers, recoveryColumnAliases.managementAgent),
     managementDate: findColumn(headers, recoveryColumnAliases.managementDate),
     tipification: findColumn(headers, recoveryColumnAliases.tipification),
+    motive: findColumn(headers, recoveryColumnAliases.motive),
+    trackabout: findColumn(headers, recoveryColumnAliases.trackabout),
     observations: findColumn(headers, recoveryColumnAliases.observations),
   };
 
-  return rows.map((row, index) => ({
-    id: index + 1,
-    advisor: valueAsText(columns.advisor ? row[columns.advisor] : "") || "Sin asesor",
-    customerCode: valueAsText(columns.customerCode ? row[columns.customerCode] : "") || "Sin código",
-    customerName: valueAsText(columns.customerName ? row[columns.customerName] : "") || "Sin razón social",
-    product: valueAsText(columns.product ? row[columns.product] : "") || "Sin producto",
-    capacity: valueAsText(columns.capacity ? row[columns.capacity] : "") || "Sin capacidad",
-    managementAgent: valueAsText(columns.managementAgent ? row[columns.managementAgent] : "") || "Pendiente de gestión",
-    managementDate: valueAsText(columns.managementDate ? row[columns.managementDate] : ""),
-    tipification: valueAsText(columns.tipification ? row[columns.tipification] : ""),
-    observations: valueAsText(columns.observations ? row[columns.observations] : ""),
-    raw: headers.reduce<Record<string, string>>((record, header) => {
-      record[header] = valueAsText(row[header]);
-      return record;
-    }, {}),
-  }));
+  return rows.map((row, index) => {
+    const tipification = valueAsText(columns.tipification ? row[columns.tipification] : "");
+    const motive = valueAsText(columns.motive ? row[columns.motive] : "");
+    const catalogEntry = recoveryTipificationCatalog.find((item) => normalizeKey(item.tipification) === normalizeKey(tipification) && normalizeKey(item.motive) === normalizeKey(motive));
+
+    return {
+      id: index + 1,
+      advisor: valueAsText(columns.advisor ? row[columns.advisor] : "") || "Sin asesor",
+      customerCode: valueAsText(columns.customerCode ? row[columns.customerCode] : "") || "Sin código",
+      customerName: valueAsText(columns.customerName ? row[columns.customerName] : "") || "Sin razón social",
+      product: valueAsText(columns.product ? row[columns.product] : "") || "Sin producto",
+      capacity: valueAsText(columns.capacity ? row[columns.capacity] : "") || "Sin capacidad",
+      managementAgent: valueAsText(columns.managementAgent ? row[columns.managementAgent] : "") || "Pendiente de gestión",
+      managementDate: valueAsText(columns.managementDate ? row[columns.managementDate] : ""),
+      tipification,
+      motive,
+      submotive: catalogEntry?.submotive ?? "",
+      trackabout: valueAsText(columns.trackabout ? row[columns.trackabout] : ""),
+      observations: valueAsText(columns.observations ? row[columns.observations] : ""),
+      raw: headers.reduce<Record<string, string>>((record, header) => {
+        record[header] = valueAsText(row[header]);
+        return record;
+      }, {}),
+    };
+  });
 }
 
 function recoveryPoints(rows: CylinderRecoveryRow[], key: keyof Pick<CylinderRecoveryRow, "advisor" | "customerName" | "product" | "capacity" | "managementAgent">) {
@@ -1237,6 +1277,43 @@ function countMatrixByCaseInsensitive(rows: MatrixRow[], key: keyof MatrixRow) {
 function dateKeyFromDateTime(value: string) {
   const date = parseDateTimeValue(value);
   return date ? formatLocalDate(date) : "Sin fecha";
+}
+
+const peruFixedHolidayMonthDays = new Set([
+  "01-01", "05-01", "06-07", "06-29", "07-23", "07-28", "07-29",
+  "08-06", "08-30", "10-08", "11-01", "12-08", "12-09", "12-25",
+]);
+
+function westernEasterDate(year: number) {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  return new Date(year, Math.floor((h + l - 7 * m + 114) / 31) - 1, ((h + l - 7 * m + 114) % 31) + 1);
+}
+
+function isPeruNationalHoliday(date: Date) {
+  const monthDay = `${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  if (peruFixedHolidayMonthDays.has(monthDay)) return true;
+  const easter = westernEasterDate(date.getFullYear());
+  const holyThursday = new Date(easter);
+  holyThursday.setDate(easter.getDate() - 3);
+  const goodFriday = new Date(easter);
+  goodFriday.setDate(easter.getDate() - 2);
+  return formatLocalDate(date) === formatLocalDate(holyThursday) || formatLocalDate(date) === formatLocalDate(goodFriday);
+}
+
+function isRecoveryBusinessDay(date: Date) {
+  const weekday = date.getDay();
+  return weekday >= 1 && weekday <= 5 && !isPeruNationalHoliday(date);
 }
 
 function monthKeyFromDateTime(value: string) {
@@ -1879,17 +1956,22 @@ function StatCard({
   label,
   value,
   comparison,
+  badge,
 }: {
   icon: ReactNode;
   label: string;
   value: string | number;
   comparison?: ReactNode;
+  badge?: ReactNode;
 }) {
   return (
     <div className={styles.statCard}>
       <div className={styles.statIcon}>{icon}</div>
       <span>{label}</span>
-      <strong>{value}</strong>
+      <div className={styles.statValue}>
+        <strong>{value}</strong>
+        {badge ? <small className={styles.statBadge}>{badge}</small> : null}
+      </div>
       {comparison ? <small className={styles.statComparison}>{comparison}</small> : null}
     </div>
   );
@@ -2092,6 +2174,9 @@ export default function Home() {
   const [recoveryStartDate, setRecoveryStartDate] = useState("");
   const [recoveryEndDate, setRecoveryEndDate] = useState("");
   const [recoveryManagementAgent, setRecoveryManagementAgent] = useState("");
+  const [recoveryTipificationFilter, setRecoveryTipificationFilter] = useState("");
+  const [recoveryTipificationFocus, setRecoveryTipificationFocus] = useState<string | null>(null);
+  const [recoveryRecoveredTipificationFocus, setRecoveryRecoveredTipificationFocus] = useState<string | null>(null);
   const [recoveryAdvisorFocus, setRecoveryAdvisorFocus] = useState<string | null>(null);
   const [recoveryCustomerFocus, setRecoveryCustomerFocus] = useState<string | null>(null);
   const [recoveryProductFocus, setRecoveryProductFocus] = useState<string | null>(null);
@@ -2300,14 +2385,31 @@ export default function Home() {
       const date = dateKeyFromDateTime(row.managementDate);
       return (!recoveryStartDate || (date !== "Sin fecha" && date >= recoveryStartDate)) &&
         (!recoveryEndDate || (date !== "Sin fecha" && date <= recoveryEndDate)) &&
-        (!recoveryManagementAgent || row.managementAgent === recoveryManagementAgent);
+        (!recoveryManagementAgent || row.managementAgent === recoveryManagementAgent) &&
+        (!recoveryTipificationFilter || row.tipification === recoveryTipificationFilter);
     }),
-    [recoveryEndDate, recoveryManagementAgent, recoveryRows, recoveryStartDate],
+    [recoveryEndDate, recoveryManagementAgent, recoveryRows, recoveryStartDate, recoveryTipificationFilter],
   );
   const recoveryManagementAgents = useMemo(
     () => Array.from(new Set(recoveryRows.map((row) => row.managementAgent).filter((value) => value !== "Pendiente de gestión"))).sort((a, b) => a.localeCompare(b, "es")),
     [recoveryRows],
   );
+  const recoveryTipificationOptions = useMemo(
+    () => Array.from(new Set(recoveryRows.map((row) => row.tipification).filter(Boolean))).sort((a, b) => a.localeCompare(b, "es")),
+    [recoveryRows],
+  );
+  const recoveryByTipification = useMemo(() => {
+    const counts = new Map<string, number>();
+    recoveryFilteredRows.forEach((row) => addToCount(counts, row.tipification || "Sin tipificación"));
+    return pointsFromMap(counts);
+  }, [recoveryFilteredRows]);
+  const recoveryByMotive = useMemo(() => {
+    const counts = new Map<string, number>();
+    recoveryFilteredRows
+      .filter((row) => !recoveryTipificationFocus || row.tipification === recoveryTipificationFocus)
+      .forEach((row) => addToCount(counts, row.motive || "Sin motivo"));
+    return pointsFromMap(counts);
+  }, [recoveryFilteredRows, recoveryTipificationFocus]);
   const recoveryOxygenRows = useMemo(
     () => recoveryFilteredRows.filter((row) => normalizeKey(row.product).includes("oxigeno")),
     [recoveryFilteredRows],
@@ -2340,23 +2442,46 @@ export default function Home() {
   const recoveryOxygenByCapacity = useMemo(() => recoveryPoints(recoveryCapacityRows, "capacity"), [recoveryCapacityRows]);
   const recoveryByManagementAgent = useMemo(() => recoveryManagementAgentPoints(recoveryFilteredRows).slice(0, 12), [recoveryFilteredRows]);
   const recoveryByManagementDate = useMemo(() => {
-    const counts = new Map<string, { managed: number; scheduled: number }>();
+    const counts = new Map<string, { managed: number; recovered: number; scheduled: number }>();
     recoveryFilteredRows.forEach((row) => {
       const date = dateKeyFromDateTime(row.managementDate);
       if (date === "Sin fecha") return;
-      const current = counts.get(date) ?? { managed: 0, scheduled: 0 };
+      const current = counts.get(date) ?? { managed: 0, recovered: 0, scheduled: 0 };
+      const motive = normalizeKey(row.motive);
       counts.set(date, {
         managed: current.managed + 1,
-        scheduled: current.scheduled + (normalizeKey(row.tipification) === "programacion recojo cilindro" ? 1 : 0),
+        recovered: current.recovered + (motive === "recuperado" ? 1 : 0),
+        scheduled: current.scheduled + (motive === "programacion recojo" ? 1 : 0),
       });
     });
     return Array.from(counts.entries())
       .sort(([firstDate], [secondDate]) => firstDate.localeCompare(secondDate))
+      .filter(([date]) => {
+        return isRecoveryBusinessDay(new Date(`${date}T00:00:00`));
+      })
       .map(([date, values]) => {
         const [, month, day] = date.split("-");
         return { name: `${day}/${month}`, ...values };
       });
   }, [recoveryFilteredRows]);
+  const recoveryWeekdayGoal = useMemo(() => {
+    const registeredDates = recoveryFilteredRows
+      .map((row) => dateKeyFromDateTime(row.managementDate))
+      .filter((date) => date !== "Sin fecha")
+      .sort();
+    if (!registeredDates.length) return { days: 0, recovered: 0, target: 0, difference: 0 };
+
+    const firstDate = new Date(`${registeredDates[0]}T00:00:00`);
+    const lastDate = new Date();
+    lastDate.setHours(0, 0, 0, 0);
+    let days = 0;
+    for (const cursor = new Date(firstDate); cursor <= lastDate; cursor.setDate(cursor.getDate() + 1)) {
+      if (isRecoveryBusinessDay(cursor)) days += 1;
+    }
+    const recovered = recoveryByManagementDate.reduce((total, day) => total + day.recovered, 0);
+    const target = days * 20;
+    return { days, recovered, target, difference: recovered - target };
+  }, [recoveryByManagementDate, recoveryFilteredRows]);
   const recoveryDetailRows = useMemo(() => recoveryFilteredRows.slice(0, detailRowLimit), [recoveryFilteredRows]);
   const recoveryHiddenRows = Math.max(0, recoveryFilteredRows.length - recoveryDetailRows.length);
   const recoveryCustomers = useMemo(() => new Set(recoveryFilteredRows.map((row) => row.customerCode).filter((value) => value !== "Sin código")).size, [recoveryFilteredRows]);
@@ -2365,8 +2490,39 @@ export default function Home() {
     () => new Set(recoveryFilteredRows.filter((row) => row.managementAgent !== "Pendiente de gestión").map((row) => row.customerCode).filter((value) => value !== "Sin código")).size,
     [recoveryFilteredRows],
   );
+  const recoveryContactRows = useMemo(
+    () => recoveryFilteredRows.filter((row) => normalizeKey(row.tipification) === "contacto").length,
+    [recoveryFilteredRows],
+  );
+  const recoveryNoContactRows = useMemo(
+    () => recoveryFilteredRows.filter((row) => normalizeKey(row.tipification) === "no contacto").length,
+    [recoveryFilteredRows],
+  );
   const recoveredCylinders = useMemo(
-    () => recoveryFilteredRows.filter((row) => normalizeKey(row.tipification) === "programacion recojo cilindro").length,
+    () => recoveryFilteredRows.filter((row) => normalizeKey(row.motive) === "recuperado").length,
+    [recoveryFilteredRows],
+  );
+  const recoveryRecoveredByTipification = useMemo(() => {
+    const counts = new Map<string, number>();
+    recoveryFilteredRows
+      .filter((row) => normalizeKey(row.motive) === "recuperado")
+      .forEach((row) => addToCount(counts, normalizeKey(row.tipification) === "contacto" ? "ASESOR" : row.tipification || "Sin tipificación"));
+    return pointsFromMap(counts);
+  }, [recoveryFilteredRows]);
+  const recoveryRecoveredByTrackabout = useMemo(() => {
+    const counts = new Map<string, number>();
+    recoveryFilteredRows
+      .filter((row) => normalizeKey(row.motive) === "recuperado" && Boolean(row.trackabout))
+      .filter((row) => !recoveryRecoveredTipificationFocus || (normalizeKey(row.tipification) === "contacto" ? "ASESOR" : row.tipification || "Sin tipificación") === recoveryRecoveredTipificationFocus)
+      .forEach((row) => addToCount(counts, row.trackabout));
+    return pointsFromMap(counts);
+  }, [recoveryFilteredRows, recoveryRecoveredTipificationFocus]);
+  const recoveryRecoveredByProduct = useMemo(
+    () => recoveryPoints(recoveryFilteredRows.filter((row) => normalizeKey(row.motive) === "recuperado"), "product"),
+    [recoveryFilteredRows],
+  );
+  const recoveryRecoveredByCommercialAdvisor = useMemo(
+    () => recoveryPoints(recoveryFilteredRows.filter((row) => normalizeKey(row.motive) === "recuperado"), "advisor"),
     [recoveryFilteredRows],
   );
   const statusTotal = statusChartSummary.total;
@@ -2621,6 +2777,9 @@ export default function Home() {
       setRecoveryStartDate("");
       setRecoveryEndDate("");
       setRecoveryManagementAgent("");
+      setRecoveryTipificationFilter("");
+      setRecoveryTipificationFocus(null);
+      setRecoveryRecoveredTipificationFocus(null);
       setRecoveryAdvisorFocus(null);
       setRecoveryCustomerFocus(null);
       setRecoveryProductFocus(null);
@@ -2862,6 +3021,63 @@ export default function Home() {
     );
   }
 
+  function renderRecoveryTipificationPie(data: ChartPoint[], focusedName: string | null, onPointClick: (name: string) => void) {
+    const total = data.reduce((sum, point) => sum + point.total, 0);
+    return data.length ? (
+      <div className={styles.statusChartLayout}>
+        <div className={styles.pieFrame}>
+          <ResponsiveContainer width="100%" height={300}>
+            <PieChart>
+              <Pie
+                isAnimationActive={false}
+                data={data}
+                dataKey="total"
+                nameKey="name"
+                innerRadius={64}
+                outerRadius={104}
+                paddingAngle={2}
+                onClick={(entry) => onPointClick(String((entry as unknown as ChartPoint).name))}
+              >
+                {data.map((entry, index) => <Cell key={entry.name} fill={chartColor(index)} opacity={focusedName && focusedName !== entry.name ? 0.2 : 1} />)}
+              </Pie>
+              <Tooltip formatter={(value) => [`${Number(value).toLocaleString("es-PE")} · ${formatPercent(percentage(Number(value), total))}`, "Cilindros"]} />
+            </PieChart>
+          </ResponsiveContainer>
+          <div className={styles.pieCenter}>
+            <span>{focusedName ? "Seleccionado" : "Total"}</span>
+            <strong>{(focusedName ? data.find((item) => item.name === focusedName)?.total ?? 0 : total).toLocaleString("es-PE")}</strong>
+          </div>
+        </div>
+        <div className={styles.statusLegend}>
+          {data.map((item, index) => <button className={styles.legendItem} type="button" key={item.name} onClick={() => onPointClick(item.name)}><span style={{ backgroundColor: chartColor(index) }} /><strong>{item.name}</strong><em>{item.total.toLocaleString("es-PE")}</em></button>)}
+        </div>
+      </div>
+    ) : <EmptyChart>Sin tipificaciones para graficar</EmptyChart>;
+  }
+
+  function renderRecoveryMotiveChart(data: ChartPoint[]) {
+    const total = data.reduce((sum, point) => sum + point.total, 0);
+    const percentages = data.map((point) => ({ name: point.name, count: point.total, percentage: total ? (point.total / total) * 100 : 0 }));
+    const height = Math.max(280, Math.min(620, percentages.length * 42));
+    const displayPercentage = (value: number) => `${Math.round(value)}%`;
+
+    return percentages.length ? (
+      <div className={styles.scrollChart}>
+        <ResponsiveContainer width="100%" height={height}>
+          <BarChart data={percentages} layout="vertical" margin={{ left: 16, right: 42, top: 8, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#dce5f0" />
+            <XAxis type="number" domain={[0, 100]} tickFormatter={(value) => displayPercentage(Number(value))} />
+            <YAxis type="category" dataKey="name" width={160} tick={{ fontSize: 11 }} />
+            <Tooltip formatter={(value, name, item) => name === "Porcentaje" ? [`${displayPercentage(Number(value))} · ${Number(item.payload.count).toLocaleString("es-PE")} registros`, name] : [value, name]} />
+            <Bar dataKey="percentage" name="Porcentaje" fill="#f97316" radius={[0, 4, 4, 0]}>
+              <LabelList dataKey="count" position="right" formatter={(value: unknown) => `${Number(value).toLocaleString("es-PE")} registros`} fill="#334155" fontSize={12} fontWeight={700} />
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    ) : <EmptyChart>Sin motivos para graficar</EmptyChart>;
+  }
+
   function renderRecoveryAgentChart(data: RecoveryAgentPoint[]) {
     const height = Math.max(280, Math.min(620, data.length * 46));
     return data.length ? (
@@ -2913,6 +3129,7 @@ export default function Home() {
             <Legend verticalAlign="top" height={28} />
             <ReferenceLine y={20} stroke="#dc2626" strokeWidth={2.5} strokeDasharray="7 4" label={{ value: "Meta diaria · 20", position: "insideTopRight", fill: "#b91c1c", fontSize: 12, fontWeight: 700 }} />
             <Bar dataKey="managed" name="Gestiones registradas" fill="#2563eb" radius={[4, 4, 0, 0]} />
+            <Bar dataKey="recovered" name="Recuperados" fill="#10b981" radius={[4, 4, 0, 0]} />
             <Bar dataKey="scheduled" name="Programaciones de recojo" fill="#f43f5e" radius={[4, 4, 0, 0]}>
               {data.map((entry) => <Cell key={entry.name} fill={entry.scheduled >= 20 ? "#10b981" : "#f43f5e"} />)}
               <LabelList dataKey="scheduled" position="top" fill="#334155" fontSize={12} fontWeight={700} />
@@ -3891,22 +4108,6 @@ export default function Home() {
             <StatCard icon={<Hash size={18} />} label="Correos atendidos" value={emailSummary.attended.toLocaleString("es-PE")} />
           </div>
 
-          <div className={`${styles.matrixGrid} ${styles.fullWidthDashboard}`}>
-            <ChartPanel
-              title="Mapa de calor I2"
-              meta="Correos recibidos por día y hora · pasa el cursor para ver la tipificación"
-              comparison={emailVolumeComparison}
-            >
-              <HeatmapGrid
-                cells={emailHeatmap}
-                formatter={(value) => `${value.toLocaleString("es-PE")} correos recibidos`}
-                detailFormatter={(cell) => emailTipificationsByHeatmapCell.get(heatmapCellKey(cell.day, cell.hour)) ?? "Por tipificación: sin correos"}
-              />
-            </ChartPanel>
-          </div>
-
-          {renderAgentTimeline()}
-
           <div className={styles.matrixGrid}>
             <ChartPanel title="Evolución mensual de correos recibidos" meta="COUNT DISTINCT id_email" comparison={emailVolumeComparison} info="Campos: date_email e id_email. Agrupa por año-mes y cuenta correos únicos.">
               {renderEmailMonthlyChart()}
@@ -3949,6 +4150,31 @@ export default function Home() {
             >
               {renderMatrixMonthlyTimeChart(matrixSummary.avgByMonth)}
             </ChartPanel>
+          </div>
+
+          <div className={`${styles.matrixGrid} ${styles.fullWidthDashboard}`}>
+            <ChartPanel
+              title="Mapa de calor I2"
+              meta="Correos recibidos por día y hora · pasa el cursor para ver la tipificación"
+              comparison={emailVolumeComparison}
+            >
+              <HeatmapGrid
+                cells={emailHeatmap}
+                formatter={(value) => `${value.toLocaleString("es-PE")} correos recibidos`}
+                detailFormatter={(cell) => emailTipificationsByHeatmapCell.get(heatmapCellKey(cell.day, cell.hour)) ?? "Por tipificación: sin correos"}
+              />
+            </ChartPanel>
+          </div>
+
+          {renderAgentTimeline()}
+
+          <div className={styles.matrixUserDetailLayout}>
+            <ChartPanel
+              title="Usuario asignado"
+              meta={`${matrixSummary.byUser.length} usuarios`}
+            >
+              {renderMatrixUserChart()}
+            </ChartPanel>
             <ChartPanel
               title="Estado de registro"
               meta={`${matrixSummary.byEstado.length} estados · clic para ver el detalle`}
@@ -3963,14 +4189,7 @@ export default function Home() {
             </ChartPanel>
           </div>
 
-          <div className={styles.matrixUserDetailLayout}>
-            <ChartPanel
-              title="Usuario asignado"
-              meta={`${matrixSummary.byUser.length} usuarios`}
-            >
-              {renderMatrixUserChart()}
-            </ChartPanel>
-            <article className={styles.panel}>
+          <article className={`${styles.panel} ${styles.matrixDetailPanel}`}>
             <div className={styles.panelHeader}>
               <div>
                 <h2>Detalle matriz</h2>
@@ -4011,8 +4230,7 @@ export default function Home() {
                 </tbody>
               </table>
             </div>
-            </article>
-          </div>
+          </article>
 
           <article className={styles.panel}>
             <div className={styles.panelHeader}><div><h2>Tabla resumen del periodo</h2><span>Valores mensuales con id_email único · variación contra el mes anterior</span></div></div>
@@ -4047,7 +4265,7 @@ export default function Home() {
             <div>
               <small className={styles.reportKicker}>Indicador 04 · Préstamo de cilindros</small>
               <h2>I4 - Recuperación cilindros</h2>
-              <span className={styles.reportDescription}>Carga la hoja BD OCT26 para conocer clientes, cilindros de oxígeno por capacidad y gestión de recuperación.</span>
+              <span className={styles.reportDescription}>Carga la base operativa BD OCT26 para analizar la gestión de recuperación.</span>
             </div>
             <div className={styles.inlineUpload} onClick={() => recoveryInputRef.current?.click()} role="button" tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") recoveryInputRef.current?.click(); }}>
               <FileSpreadsheet size={18} aria-hidden="true" />
@@ -4062,25 +4280,48 @@ export default function Home() {
             <section className={styles.filterBar} onClick={stopInsideClick}>
               <div className={styles.filterBarHeader}>
                 <strong>Filtros de gestión</strong>
-                {(recoveryStartDate || recoveryEndDate || recoveryManagementAgent) ? <button className={styles.chartActionButton} type="button" onClick={() => { setRecoveryStartDate(""); setRecoveryEndDate(""); setRecoveryManagementAgent(""); }}>Limpiar filtros</button> : null}
+                {(recoveryStartDate || recoveryEndDate || recoveryManagementAgent || recoveryTipificationFilter) ? <button className={styles.chartActionButton} type="button" onClick={() => { setRecoveryStartDate(""); setRecoveryEndDate(""); setRecoveryManagementAgent(""); setRecoveryTipificationFilter(""); setRecoveryTipificationFocus(null); setRecoveryRecoveredTipificationFocus(null); }}>Limpiar filtros</button> : null}
               </div>
               <div className={styles.filterGrid}>
                 <label>Fecha de gestión desde<input type="date" value={recoveryStartDate} onChange={(event) => setRecoveryStartDate(event.target.value)} /></label>
                 <label>Fecha de gestión hasta<input type="date" value={recoveryEndDate} onChange={(event) => setRecoveryEndDate(event.target.value)} /></label>
                 <label>Agente que realiza gestión<select value={recoveryManagementAgent} onChange={(event) => setRecoveryManagementAgent(event.target.value)}><option value="">Todos los agentes</option>{recoveryManagementAgents.map((agent) => <option key={agent} value={agent}>{agent}</option>)}</select></label>
+                <label>Tipificación<select value={recoveryTipificationFilter} onChange={(event) => { setRecoveryTipificationFilter(event.target.value); setRecoveryTipificationFocus(null); }}><option value="">Todas las tipificaciones</option>{recoveryTipificationOptions.map((tipification) => <option key={tipification} value={tipification}>{tipification}</option>)}</select></label>
               </div>
             </section>
 
             <section className={styles.statsGrid} onClick={stopInsideClick}>
-              <StatCard icon={<Hash size={18} />} label="Cilindros en préstamo" value={recoveryFilteredRows.length.toLocaleString("es-PE")} />
-              <StatCard icon={<UserRound size={18} />} label="Clientes" value={recoveryCustomers.toLocaleString("es-PE")} />
-              <StatCard icon={<Phone size={18} />} label="Cilindros de oxígeno" value={recoveryOxygenRows.length.toLocaleString("es-PE")} />
-              <StatCard icon={<ClipboardList size={18} />} label="Gestiones registradas" value={recoveryManagedRows.toLocaleString("es-PE")} />
+              <StatCard icon={<Hash size={18} />} label="Cilindros - Series en base" value={recoveryFilteredRows.length.toLocaleString("es-PE")} />
+              <StatCard icon={<UserRound size={18} />} label="Clientes únicos en base" value={recoveryCustomers.toLocaleString("es-PE")} />
+              <StatCard icon={<ClipboardList size={18} />} label="Series registradas" value={recoveryManagedRows.toLocaleString("es-PE")} />
               <StatCard icon={<UserRound size={18} />} label="Clientes gestionados" value={recoveryManagedCustomers.toLocaleString("es-PE")} />
+              <StatCard icon={<Phone size={18} />} label="Contactos / Sin contacto" value={`${recoveryContactRows.toLocaleString("es-PE")} / ${recoveryNoContactRows.toLocaleString("es-PE")}`} badge={formatPercent(percentage(recoveryContactRows, recoveryContactRows + recoveryNoContactRows))} />
               <StatCard icon={<PackageCheck size={18} />} label="N.º de cilindros recuperados" value={recoveredCylinders.toLocaleString("es-PE")} />
             </section>
 
             <section className={styles.dashboardGrid} onClick={stopInsideClick}>
+              <ChartPanel title="Cilindros por tipificación" meta="Haz clic en una categoría para ver sus motivos">
+                {renderRecoveryTipificationPie(recoveryByTipification, recoveryTipificationFocus, (tipification) => {
+                  setRecoveryTipificationFocus((current) => current === tipification ? null : tipification);
+                })}
+              </ChartPanel>
+              <ChartPanel title="Motivos de la tipificación" meta={recoveryTipificationFocus ? `Motivos de: ${recoveryTipificationFocus} · en %` : "Todos los motivos · en %"}>
+                {renderRecoveryMotiveChart(recoveryByMotive)}
+              </ChartPanel>
+              <ChartPanel title="Recuperados por tipificación" meta="MOTIVO: RECUPERADO · CONTACTO se muestra como ASESOR">
+                {renderRecoveryTipificationPie(recoveryRecoveredByTipification, recoveryRecoveredTipificationFocus, (tipification) => setRecoveryRecoveredTipificationFocus((current) => current === tipification ? null : tipification))}
+              </ChartPanel>
+              <ChartPanel title="Ubicación de cilindro" meta={recoveryRecoveredTipificationFocus ? `Tipificación seleccionada: ${recoveryRecoveredTipificationFocus} · columna W` : "Selecciona una tipificación en la torta"}>
+                {recoveryRecoveredTipificationFocus
+                  ? renderRecoveryRankingChart(recoveryRecoveredByTrackabout, "#0ea5e9")
+                  : <EmptyChart>Selecciona una sección de Recuperados por tipificación.</EmptyChart>}
+              </ChartPanel>
+              <ChartPanel title="Recuperados por producto" meta="MOTIVO: RECUPERADO">
+                {renderRecoveryRankingChart(recoveryRecoveredByProduct, "#7c3aed")}
+              </ChartPanel>
+              <ChartPanel title="Recuperados por asesor comercial" meta="MOTIVO: RECUPERADO · campo Asesor">
+                {renderRecoveryCapacityChart(recoveryRecoveredByCommercialAdvisor, "#059669")}
+              </ChartPanel>
               <ChartPanel title="Cilindros por asesor" meta="Todos los asesores · campo Asesor">
                 {renderRecoveryRankingChart(recoveryByAdvisor, "#2563eb", (advisor) => setRecoveryAdvisorFocus((current) => {
                   const next = current === advisor ? null : advisor;
@@ -4105,7 +4346,15 @@ export default function Home() {
               <ChartPanel title="Gestiones por agente" meta="AGENTE QUE REALIZA GESTIÓN · Top 12">
                 {renderRecoveryAgentChart(recoveryByManagementAgent)}
               </ChartPanel>
-              <ChartPanel title="Gestiones por fecha" meta="Gestiones registradas y programaciones de recojo · línea base: 20">
+              <ChartPanel
+                title="Gestiones por fecha"
+                meta="Gestiones, recuperados y programaciones de recojo · línea base: 20"
+                comparison={recoveryWeekdayGoal.days ? (
+                  <span className={`${styles.comparisonBadge} ${recoveryWeekdayGoal.difference >= 0 ? styles.comparisonUp : styles.comparisonDown}`}>
+                    Meta: {recoveryWeekdayGoal.target.toLocaleString("es-PE")} · Recuperados: {recoveryWeekdayGoal.recovered.toLocaleString("es-PE")} · {recoveryWeekdayGoal.difference >= 0 ? `+${recoveryWeekdayGoal.difference.toLocaleString("es-PE")}` : `Faltan ${Math.abs(recoveryWeekdayGoal.difference).toLocaleString("es-PE")}`}
+                  </span>
+                ) : null}
+              >
                 {renderRecoveryScheduleDateChart(recoveryByManagementDate)}
               </ChartPanel>
             </section>
@@ -4119,12 +4368,12 @@ export default function Home() {
               </div>
               <div className={styles.tableWrap}>
                 <table>
-                  <thead><tr><th>Asesor</th><th>Cód. cliente</th><th>Razón social</th><th>Producto</th><th>Capacidad</th><th>Fecha de gestión</th><th>Agente que realiza gestión</th><th>Observaciones o comentarios</th></tr></thead>
-                  <tbody>{recoveryDetailRows.map((row) => <tr key={row.id}><td>{row.advisor}</td><td>{row.customerCode}</td><td>{row.customerName}</td><td>{row.product}</td><td>{row.capacity}</td><td>{row.managementDate ? formatDateTimeMinute(row.managementDate) : "Pendiente de gestión"}</td><td>{row.managementAgent}</td><td>{row.observations || "Sin observaciones"}</td></tr>)}</tbody>
+                  <thead><tr><th>Asesor</th><th>Cód. cliente</th><th>Razón social</th><th>Producto</th><th>Capacidad</th><th>Tipificación</th><th>Motivo</th><th>Submotivo</th><th>Fecha de gestión</th><th>Agente que realiza gestión</th><th>Observaciones o comentarios</th></tr></thead>
+                  <tbody>{recoveryDetailRows.map((row) => <tr key={row.id}><td>{row.advisor}</td><td>{row.customerCode}</td><td>{row.customerName}</td><td>{row.product}</td><td>{row.capacity}</td><td>{row.tipification || "Sin tipificación"}</td><td>{row.motive || "Sin motivo"}</td><td>{row.submotive || "Sin submotivo"}</td><td>{row.managementDate ? formatDateTimeMinute(row.managementDate) : "Pendiente de gestión"}</td><td>{row.managementAgent}</td><td>{row.observations || "Sin observaciones"}</td></tr>)}</tbody>
                 </table>
               </div>
             </article>
-          </> : <section className={styles.emptyState} onClick={stopInsideClick}><ClipboardList size={22} aria-hidden="true" /><strong>I4 - Recuperación cilindros listo</strong><span>Carga el Excel con la hoja BD OCT26 para visualizar el préstamo y la gestión de cilindros.</span></section>}
+          </> : <section className={styles.emptyState} onClick={stopInsideClick}><ClipboardList size={22} aria-hidden="true" /><strong>I4 - Recuperación cilindros listo</strong><span>Carga la base con la hoja BD OCT26 para analizar la gestión de cilindros.</span></section>}
         </>
       ) : null}
 
