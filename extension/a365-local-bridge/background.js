@@ -172,7 +172,9 @@ async function downloadInboundReport(payload) {
   if (!campaign) {
   const loginPageResponse = await fetch(INBOUND_LOGIN_PAGE, { cache: "no-store", credentials: "include", headers: inboundHeaders({ accept: "text/html" }) });
   const loginCsrf = extractInboundCsrf(await loginPageResponse.text());
-  if (!loginPageResponse.ok || !loginCsrf) throw new Error("No pude preparar el inicio de sesión de A365.");
+  if (!loginPageResponse.ok || !loginCsrf) {
+    throw new Error(`No pude preparar el inicio de sesión de A365 (HTTP ${loginPageResponse.status}; CSRF ${loginCsrf ? "detectado" : "no detectado"}).`);
+  }
 
   const loginPayload = new URLSearchParams({ usernamePost: "psalasb", passwordPost: token, extensionPost: "", csrfPost: loginCsrf });
   const loginResponse = await fetch(INBOUND_LOGIN, {
