@@ -164,6 +164,12 @@ async function downloadInboundReport(payload) {
   if (!isValidDate(startDate) || !isValidDate(endDate) || startDate > endDate) throw new Error("Selecciona fechas válidas.");
   if (!token) throw new Error("Ingresa tu token de A365.");
 
+  // Si el usuario ya inició sesión en el portal, la extensión reutiliza esa
+  // sesión local antes de solicitar otro inicio de sesión.
+  let reportPageResponse = await fetch(INBOUND_REPORT_PAGE, { cache: "no-store", credentials: "include", headers: inboundHeaders({ accept: "text/html" }) });
+  let campaign = extractInboundCampaign(await reportPageResponse.text());
+
+  if (!campaign) {
   const loginPageResponse = await fetch(INBOUND_LOGIN_PAGE, { cache: "no-store", credentials: "include", headers: inboundHeaders({ accept: "text/html" }) });
   const loginCsrf = extractInboundCsrf(await loginPageResponse.text());
   if (!loginPageResponse.ok || !loginCsrf) throw new Error("No pude preparar el inicio de sesión de A365.");
@@ -176,8 +182,9 @@ async function downloadInboundReport(payload) {
   });
   if (!loginResponse.ok) throw new Error("No pude iniciar sesión en A365.");
 
-  const reportPageResponse = await fetch(INBOUND_REPORT_PAGE, { cache: "no-store", credentials: "include", headers: inboundHeaders({ accept: "text/html" }) });
-  const campaign = extractInboundCampaign(await reportPageResponse.text());
+    reportPageResponse = await fetch(INBOUND_REPORT_PAGE, { cache: "no-store", credentials: "include", headers: inboundHeaders({ accept: "text/html" }) });
+    campaign = extractInboundCampaign(await reportPageResponse.text());
+  }
   if (!reportPageResponse.ok || !campaign) throw new Error("A365 no devolvió la configuración de campaña.");
 
   const generationPayload = new URLSearchParams({
