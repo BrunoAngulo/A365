@@ -2177,6 +2177,7 @@ export default function Home() {
   const [recoveryTipificationFilter, setRecoveryTipificationFilter] = useState("");
   const [recoveryTipificationFocus, setRecoveryTipificationFocus] = useState<string | null>(null);
   const [recoveryRecoveredTipificationFocus, setRecoveryRecoveredTipificationFocus] = useState<string | null>(null);
+  const [recoveryTrackaboutFocus, setRecoveryTrackaboutFocus] = useState<string | null>(null);
   const [recoveryRecoveredProductFocus, setRecoveryRecoveredProductFocus] = useState<string | null>(null);
   const [recoveryAdvisorFocus, setRecoveryAdvisorFocus] = useState<string | null>(null);
   const [recoveryCustomerFocus, setRecoveryCustomerFocus] = useState<string | null>(null);
@@ -2444,7 +2445,9 @@ export default function Home() {
   const recoveryByManagementAgent = useMemo(
     () => recoveryManagementAgentPoints(recoveryFilteredRows.filter((row) => {
       const agent = normalizeKey(row.managementAgent);
-      return agent.includes("chyntia") || agent.includes("klari");
+      return (agent.includes("chyntia") || agent.includes("klari"))
+        && normalizeKey(row.tipification) === "contacto"
+        && normalizeKey(row.motive) === "recuperado";
     })),
     [recoveryFilteredRows],
   );
@@ -2461,6 +2464,17 @@ export default function Home() {
         scheduled: current.scheduled + (motive === "programacion recojo" ? 1 : 0),
       });
     });
+    const recordedDates = Array.from(counts.keys()).sort();
+    if (recordedDates.length) {
+      const firstDate = new Date(`${recordedDates[0]}T00:00:00`);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      for (const cursor = new Date(firstDate); cursor <= today; cursor.setDate(cursor.getDate() + 1)) {
+        if (!isRecoveryBusinessDay(cursor)) continue;
+        const date = formatLocalDate(cursor);
+        if (!counts.has(date)) counts.set(date, { managed: 0, recovered: 0, scheduled: 0 });
+      }
+    }
     return Array.from(counts.entries())
       .sort(([firstDate], [secondDate]) => firstDate.localeCompare(secondDate))
       .filter(([date]) => {
@@ -2485,7 +2499,7 @@ export default function Home() {
     for (const cursor = new Date(firstDate); cursor <= lastDate; cursor.setDate(cursor.getDate() + 1)) {
       if (isRecoveryBusinessDay(cursor)) days += 1;
     }
-    const recovered = recoveryFilteredRows.filter((row) => normalizeKey(row.motive) === "recuperado").length;
+    const recovered = recoveryFilteredRows.filter((row) => normalizeKey(row.tipification) === "contacto" && normalizeKey(row.motive) === "recuperado").length;
     const target = days * 20;
     return { days, recovered, target, difference: recovered - target };
   }, [recoveryFilteredRows]);
@@ -2506,31 +2520,60 @@ export default function Home() {
     [recoveryFilteredRows],
   );
   const recoveredCylinders = useMemo(
-    () => recoveryFilteredRows.filter((row) => normalizeKey(row.motive) === "recuperado").length,
+    () => recoveryFilteredRows.filter((row) => normalizeKey(row.tipification) === "contacto" && normalizeKey(row.motive) === "recuperado").length,
     [recoveryFilteredRows],
   );
   const recoveryRecoveredByTipification = useMemo(() => {
     const counts = new Map<string, number>();
     recoveryFilteredRows
-      .filter((row) => normalizeKey(row.motive) === "recuperado")
-      .forEach((row) => addToCount(counts, normalizeKey(row.tipification) === "contacto" ? "ASESOR" : row.tipification || "Sin tipificación"));
+      .filter((row) => normalizeKey(row.tipification) === "contacto")
+      .forEach((row) => {
+        const motive = normalizeKey(row.motive);
+        if (motive === "recuperado") addToCount(counts, "RECUPERADO");
+        if (motive.startsWith("programacion recojo")) addToCount(counts, "PROGRAMACIÓN RECOJO");
+      });
     return pointsFromMap(counts);
   }, [recoveryFilteredRows]);
   const recoveryRecoveredByTrackabout = useMemo(() => {
     const counts = new Map<string, number>();
     recoveryFilteredRows
-      .filter((row) => normalizeKey(row.motive) === "recuperado" && Boolean(row.trackabout))
-      .filter((row) => !recoveryRecoveredTipificationFocus || (normalizeKey(row.tipification) === "contacto" ? "ASESOR" : row.tipification || "Sin tipificación") === recoveryRecoveredTipificationFocus)
+      .filter((row) => normalizeKey(row.tipification) === "contacto" && Boolean(row.trackabout))
+      .filter((row) => {
+        if (!recoveryRecoveredTipificationFocus) return true;
+        const motive = normalizeKey(row.motive);
+        return (motive === "recuperado" ? "RECUPERADO" : motive.startsWith("programacion recojo") ? "PROGRAMACIÓN RECOJO" : "") === recoveryRecoveredTipificationFocus;
+      })
       .forEach((row) => addToCount(counts, row.trackabout));
     return pointsFromMap(counts);
   }, [recoveryFilteredRows, recoveryRecoveredTipificationFocus]);
+  const recoverySelectedTrackaboutRows = useMemo(() => {
+    if (!recoveryTrackaboutFocus) return [];
+    return recoveryFilteredRows.filter((row) => {
+      if (normalizeKey(row.tipification) !== "contacto" || row.trackabout !== recoveryTrackaboutFocus) return false;
+      if (!recoveryRecoveredTipificationFocus) return true;
+      const motive = normalizeKey(row.motive);
+      return (motive === "recuperado" ? "RECUPERADO" : motive.startsWith("programacion recojo") ? "PROGRAMACIÓN RECOJO" : "") === recoveryRecoveredTipificationFocus;
+    });
+  }, [recoveryFilteredRows, recoveryRecoveredTipificationFocus, recoveryTrackaboutFocus]);
+  const recoveryRecoveredProductRows = useMemo(
+    () => recoveryTrackaboutFocus
+      ? recoverySelectedTrackaboutRows
+      : recoveryFilteredRows.filter((row) => normalizeKey(row.motive) === "recuperado"),
+    [recoveryFilteredRows, recoverySelectedTrackaboutRows, recoveryTrackaboutFocus],
+  );
   const recoveryRecoveredByProduct = useMemo(
-    () => recoveryPoints(recoveryFilteredRows.filter((row) => normalizeKey(row.motive) === "recuperado"), "product"),
-    [recoveryFilteredRows],
+    () => recoveryPoints(recoveryRecoveredProductRows, "product"),
+    [recoveryRecoveredProductRows],
+  );
+  const recoveryCommercialAdvisorRows = useMemo(
+    () => recoveryTrackaboutFocus
+      ? recoverySelectedTrackaboutRows
+      : recoveryFilteredRows.filter((row) => normalizeKey(row.motive) === "recuperado"),
+    [recoveryFilteredRows, recoverySelectedTrackaboutRows, recoveryTrackaboutFocus],
   );
   const recoveryRecoveredByCommercialAdvisor = useMemo(
-    () => recoveryPoints(recoveryFilteredRows.filter((row) => normalizeKey(row.motive) === "recuperado" && (!recoveryRecoveredProductFocus || row.product === recoveryRecoveredProductFocus)), "advisor"),
-    [recoveryFilteredRows, recoveryRecoveredProductFocus],
+    () => recoveryPoints(recoveryCommercialAdvisorRows.filter((row) => !recoveryRecoveredProductFocus || row.product === recoveryRecoveredProductFocus), "advisor"),
+    [recoveryCommercialAdvisorRows, recoveryRecoveredProductFocus],
   );
   const statusTotal = statusChartSummary.total;
   const statusColorFor = (name: string) => chartColor(Math.max(0, allStatusChartData.findIndex((item) => item.name === name)));
@@ -2787,6 +2830,7 @@ export default function Home() {
       setRecoveryTipificationFilter("");
       setRecoveryTipificationFocus(null);
       setRecoveryRecoveredTipificationFocus(null);
+      setRecoveryTrackaboutFocus(null);
       setRecoveryRecoveredProductFocus(null);
       setRecoveryAdvisorFocus(null);
       setRecoveryCustomerFocus(null);
@@ -3128,8 +3172,7 @@ export default function Home() {
             <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={128} />
             <Tooltip />
             <Legend />
-            <Bar dataKey="total" name="Gestiones" fill="#14b8a6" radius={[0, 4, 4, 0]} />
-            <Bar dataKey="recovered" name="Cilindros recuperados" fill="#059669" radius={[0, 4, 4, 0]} />
+            <Bar dataKey="total" name="Cilindros recuperados" fill="#059669" radius={[0, 4, 4, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -3158,23 +3201,25 @@ export default function Home() {
 
   function renderRecoveryScheduleDateChart(data: RecoveryManagementDatePoint[]) {
     return data.length ? (
-      <div className={styles.chartShell}>
-        <ResponsiveContainer width="100%" height={280}>
-          <BarChart data={data} barGap={7} barCategoryGap="28%" margin={{ left: 0, right: 16, top: 28, bottom: 0 }}>
+      <div className={styles.scrollChart}>
+        <div style={{ width: Math.max(720, data.length * 94), height: 320 }}>
+          <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={data} barGap={5} barCategoryGap="18%" margin={{ left: 0, right: 18, top: 28, bottom: 8 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#dce5f0" />
-            <XAxis dataKey="name" interval={0} angle={-35} textAnchor="end" height={54} tick={{ fontSize: 12 }} />
+            <XAxis dataKey="name" interval={0} angle={-35} textAnchor="end" height={64} tick={{ fontSize: 12 }} />
             <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
             <Tooltip />
             <Legend verticalAlign="top" height={28} />
             <ReferenceLine y={20} stroke="#dc2626" strokeWidth={2.5} strokeDasharray="7 4" label={{ value: "Meta diaria · 20", position: "insideTopRight", fill: "#b91c1c", fontSize: 12, fontWeight: 700 }} />
-            <Bar dataKey="managed" name="Gestiones registradas" fill="#2563eb" radius={[4, 4, 0, 0]} />
-            <Bar dataKey="recovered" name="Recuperados" fill="#10b981" radius={[4, 4, 0, 0]} />
-            <Bar dataKey="scheduled" name="Programaciones de recojo" fill="#f43f5e" radius={[4, 4, 0, 0]}>
+            <Bar dataKey="managed" name="Gestiones registradas" fill="#2563eb" maxBarSize={26} radius={[4, 4, 0, 0]} />
+            <Bar dataKey="recovered" name="Recuperados" fill="#10b981" maxBarSize={26} radius={[4, 4, 0, 0]} />
+            <Bar dataKey="scheduled" name="Programaciones de recojo" fill="#f43f5e" maxBarSize={26} radius={[4, 4, 0, 0]}>
               {data.map((entry) => <Cell key={entry.name} fill={entry.scheduled >= 20 ? "#10b981" : "#f43f5e"} />)}
               <LabelList dataKey="scheduled" position="top" fill="#334155" fontSize={12} fontWeight={700} />
             </Bar>
           </BarChart>
-        </ResponsiveContainer>
+          </ResponsiveContainer>
+        </div>
       </div>
     ) : (
       <EmptyChart>Sin programaciones de recojo para graficar</EmptyChart>
@@ -4319,7 +4364,7 @@ export default function Home() {
             <section className={styles.filterBar} onClick={stopInsideClick}>
               <div className={styles.filterBarHeader}>
                 <strong>Filtros de gestión</strong>
-                {(recoveryStartDate || recoveryEndDate || recoveryManagementAgent || recoveryTipificationFilter) ? <button className={styles.chartActionButton} type="button" onClick={() => { setRecoveryStartDate(""); setRecoveryEndDate(""); setRecoveryManagementAgent(""); setRecoveryTipificationFilter(""); setRecoveryTipificationFocus(null); setRecoveryRecoveredTipificationFocus(null); setRecoveryRecoveredProductFocus(null); }}>Limpiar filtros</button> : null}
+                {(recoveryStartDate || recoveryEndDate || recoveryManagementAgent || recoveryTipificationFilter) ? <button className={styles.chartActionButton} type="button" onClick={() => { setRecoveryStartDate(""); setRecoveryEndDate(""); setRecoveryManagementAgent(""); setRecoveryTipificationFilter(""); setRecoveryTipificationFocus(null); setRecoveryRecoveredTipificationFocus(null); setRecoveryTrackaboutFocus(null); setRecoveryRecoveredProductFocus(null); }}>Limpiar filtros</button> : null}
               </div>
               <div className={styles.filterGrid}>
                 <label>Fecha de gestión desde<input type="date" value={recoveryStartDate} onChange={(event) => setRecoveryStartDate(event.target.value)} /></label>
@@ -4368,23 +4413,26 @@ export default function Home() {
               <ChartPanel title="Motivos de la tipificación" meta={recoveryTipificationFocus ? `Motivos de: ${recoveryTipificationFocus} · en %` : "Todos los motivos · en %"}>
                 {renderRecoveryMotiveChart(recoveryByMotive)}
               </ChartPanel>
-              <ChartPanel title="Recuperados por tipificación" meta="MOTIVO: RECUPERADO · CONTACTO se muestra como ASESOR">
-                {renderRecoveryTipificationPie(recoveryRecoveredByTipification, recoveryRecoveredTipificationFocus, (tipification) => setRecoveryRecoveredTipificationFocus((current) => current === tipification ? null : tipification))}
+              <ChartPanel title="Recuperados por tipificación" meta="TIPIFICACIÓN: CONTACTO · RECUPERADO y PROGRAMACIÓN RECOJO">
+                {renderRecoveryTipificationPie(recoveryRecoveredByTipification, recoveryRecoveredTipificationFocus, (tipification) => {
+                  setRecoveryRecoveredTipificationFocus((current) => current === tipification ? null : tipification);
+                  setRecoveryTrackaboutFocus(null);
+                  setRecoveryRecoveredProductFocus(null);
+                })}
               </ChartPanel>
-              <ChartPanel title="Ubicación de cilindro" meta={recoveryRecoveredTipificationFocus ? `Tipificación seleccionada: ${recoveryRecoveredTipificationFocus} · columna W` : "Selecciona una tipificación en la torta"}>
-                {recoveryRecoveredTipificationFocus
-                  ? renderRecoveryRankingChart(recoveryRecoveredByTrackabout, "#0ea5e9")
-                  : <EmptyChart>Selecciona una sección de Recuperados por tipificación.</EmptyChart>}
+              <ChartPanel title="Ubicación de cilindro" meta={recoveryTrackaboutFocus ? `Ubicación seleccionada: ${recoveryTrackaboutFocus}` : "Total de ubicaciones · haz clic para filtrar producto y asesor"}>
+                {renderRecoveryRankingChart(recoveryRecoveredByTrackabout, "#0ea5e9", (location) => {
+                  setRecoveryTrackaboutFocus((current) => current === location ? null : location);
+                  setRecoveryRecoveredProductFocus(null);
+                }, recoveryTrackaboutFocus)}
               </ChartPanel>
-              <ChartPanel title="Recuperados por producto" meta="MOTIVO: RECUPERADO · haz clic para ver asesores">
+              <ChartPanel title="Recuperados por producto" meta={recoveryRecoveredProductFocus ? `Producto seleccionado: ${recoveryRecoveredProductFocus}` : recoveryTrackaboutFocus ? `Ubicación seleccionada: ${recoveryTrackaboutFocus} · haz clic para ver asesores` : "Total de recuperados · haz clic para ver asesores"}>
                 {renderRecoveryRankingChart(recoveryRecoveredByProduct, "#7c3aed", (product) => setRecoveryRecoveredProductFocus((current) => current === product ? null : product), recoveryRecoveredProductFocus)}
               </ChartPanel>
-              <ChartPanel title="Recuperados por asesor comercial" meta={recoveryRecoveredProductFocus ? `Producto seleccionado: ${recoveryRecoveredProductFocus}` : "Selecciona un producto en Recuperados por producto"}>
-                {recoveryRecoveredProductFocus
-                  ? renderRecoveryCapacityChart(recoveryRecoveredByCommercialAdvisor, "#059669")
-                  : <EmptyChart>Selecciona un producto para ver sus asesores comerciales.</EmptyChart>}
+              <ChartPanel title="Recuperados por asesor comercial" meta={recoveryRecoveredProductFocus ? `Producto seleccionado: ${recoveryRecoveredProductFocus}` : recoveryTrackaboutFocus ? `Total de asesores · ubicación: ${recoveryTrackaboutFocus}` : "Total de recuperados · selecciona ubicación o producto para filtrar"}>
+                {renderRecoveryCapacityChart(recoveryRecoveredByCommercialAdvisor, "#059669")}
               </ChartPanel>
-              <ChartPanel title="Gestiones por agente" meta="Chyntia y Klari · MOTIVO: RECUPERADO">
+              <ChartPanel title="Gestiones por agente" meta="Chyntia y Klari · CONTACTO · MOTIVO: RECUPERADO">
                 {renderRecoveryAgentChart(recoveryByManagementAgent)}
               </ChartPanel>
               <ChartPanel
